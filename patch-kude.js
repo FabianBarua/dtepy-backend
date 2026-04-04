@@ -29,6 +29,36 @@ try {
 }
 
 // ========================================
+// PARCHE 0.1: Reemplazar archivos .jasper de Nota Crédito y Nota Débito
+//             (Corrección: número CDC completo en el PDF)
+// ========================================
+const jasperFiles = [
+  'NotaCredito.jasper',
+  'NotaDebito.jasper'
+];
+
+const jasperDestDir = path.join(__dirname, 'node_modules/facturacionelectronicapy-kude/dist/DE');
+
+jasperFiles.forEach(jasperFile => {
+  const sourcePath = path.join(__dirname, jasperFile);
+  const destPath = path.join(jasperDestDir, jasperFile);
+
+  try {
+    if (fs.existsSync(sourcePath)) {
+      fs.copyFileSync(sourcePath, destPath);
+      console.log(`✅ ${jasperFile} parcheado (CDC completo en PDF)`);
+      console.log(`   Origen: ${sourcePath}`);
+      console.log(`   Destino: ${destPath}`);
+    } else {
+      console.warn(`⚠️ No se encontró ${jasperFile} en la raíz del backend`);
+      console.warn(`   Se mantendrá el archivo original sin cambios`);
+    }
+  } catch (error) {
+    console.error(`❌ Error al parchar ${jasperFile}:`, error.message);
+  }
+});
+
+// ========================================
 // PARCHE 1: facturacionelectronicapy-kude
 // ========================================
 const kudeIndexPath = path.join(__dirname, 'node_modules/facturacionelectronicapy-kude/dist/index.js');
@@ -106,7 +136,8 @@ try {
 try {
   if (fs.existsSync(qrIndexPath)) {
     let content = fs.readFileSync(qrIndexPath, 'utf8');
-    if (content.includes(qrOriginalContent)) {
+    // Verificar si tiene la firma correcta con 4 parámetros (xmlSigned, idCSC, CSC, env)
+    if (content.includes('xmlSigned, idCSC, CSC, env')) {
       console.log('✓ facturacionelectronicapy-qrgen está correcto (no requiere parche)');
     } else {
       console.warn('⚠️ Advertencia: facturacionelectronicapy-qrgen tiene una estructura diferente');

@@ -1,11 +1,11 @@
 /**
  * Migración: Agregar campo 'proceso' a facturas existentes
- * 
+ *
  * Esta migración inicializa el campo 'proceso' en todos los documentos Invoice:
- * - 'Terminado': Para facturas con estado 'aceptado' u 'observado'
- * - 'Fallido': Para facturas con estado 'rechazado' o 'error'
+ * - 'Completado': Para facturas con estado 'aceptado' u 'observado'
+ * - 'No completado': Para facturas con estado 'rechazado' o 'error'
  * - null: Para el resto de estados (encolado, procesando, enviado, recibido)
- * 
+ *
  * Uso:
  *   node migrations/001-agregar-campo-proceso.js
  */
@@ -49,10 +49,10 @@ async function migrarCampoProceso() {
 
       // Determinar valor del campo proceso según el estado
       if (['aceptado', 'observado'].includes(factura.estadoSifen)) {
-        valorProceso = 'Terminado';
+        valorProceso = 'Completado';
         terminados++;
       } else if (['rechazado', 'error'].includes(factura.estadoSifen)) {
-        valorProceso = 'Fallido';
+        valorProceso = 'No completado';
         fallidos++;
       } else {
         // encolado, procesando, enviado, recibido

@@ -206,7 +206,7 @@ function determinarEstadoSegunCodigo(codigo) {
  * Los estados se determinan directamente por códigos oficiales.
  *
  * @param {string} codigo - Código de retorno de 4 dígitos
- * @returns {string} Estado visual: 'aceptado', 'observado', 'rechazado'
+ * @returns {string} Estado visual: 'aceptado', 'observado', 'rechazado', 'error'
  */
 function determinarEstadoVisual(codigo) {
   if (!codigo) return 'rechazado';
@@ -221,6 +221,11 @@ function determinarEstadoVisual(codigo) {
     return 'observado';
   }
 
+  // 9999 = Rojo (Error de conexión - no es rechazo de SET)
+  if (codigo === '9999') {
+    return 'error';
+  }
+
   // Otros = Rojo (Rechazado) - incluye 0420, 0421
   return 'rechazado';
 }
@@ -228,7 +233,7 @@ function determinarEstadoVisual(codigo) {
 /**
  * Obtiene el color de Vuetify para el estado visual
  *
- * @param {string} estadoVisual - Estado visual: 'aceptado', 'observado', 'rechazado'
+ * @param {string} estadoVisual - Estado visual: 'aceptado', 'observado', 'rechazado', 'error'
  * @returns {string} Color de Vuetify: 'success', 'amber', 'error'
  */
 function getColorPorEstadoVisual(estadoVisual) {
@@ -239,6 +244,8 @@ function getColorPorEstadoVisual(estadoVisual) {
       return 'amber';    // Amarillo medio oscuro
     case 'rechazado':
       return 'error';    // Rojo
+    case 'error':
+      return 'error';    // Rojo (mismo color, pero semántica diferente)
     default:
       return 'info';
   }

@@ -20,12 +20,12 @@ function generarFacturaHash(datosFactura) {
   const crypto = require('crypto');
 
   // Soportar ambas estructuras: param/data y plana
-  const ruc = datosFactura.param?.ruc || datosFactura.ruc?.replace(/[^0-9]/g, '') || '';
-  const establecimiento = datosFactura.data?.establecimiento || datosFactura.establecimiento || '001';
-  const numero = datosFactura.data?.numero || datosFactura.numero || '';
+  const ruc = datosFactura.param?.ruc;
+  const csa = datosFactura.data?.codigoSeguridadAleatorio;
+  const numero = datosFactura.data?.numero;
 
-  // Hash único por RUC + Establecimiento + Número
-  const cadena = `${ruc}|${establecimiento}|${numero}`;
+  // Hash único por RUC + Codigo Seguridad Aleatorio + Número
+  const cadena = `${ruc}|${csa}|${numero}`;
   return crypto.createHash('sha256').update(cadena).digest('hex');
 }
 
@@ -133,12 +133,56 @@ router.post('/crear', async (req, res) => {
     const facturaExistente = await Invoice.findOne({ facturaHash });
 
     if (facturaExistente) {
-      // Si el proceso anterior está marcado como 'Terminado', no permitir duplicado
-      if (facturaExistente.proceso === 'Terminado') {
+      const estadosFinalesAprobados = ['aceptado', 'observado'];
+      const estaAprobada = estadosFinalesAprobados.includes(facturaExistente.estadoSifen) && facturaExistente.cdc;
+
+      // CASO ESPECIAL: Factura aprobada por SET pero proceso falló (PDF no se generó)
+      // → Solo regenerar PDF, NO reenviar a SET
+      if (estaAprobada && facturaExistente.proceso === 'No completado') {
+        console.log(`📄 Factura ${facturaExistente._id} aprobada por SET pero PDF fallido - Regenerando solo PDF`);
+
+        // Resetear solo proceso y kudePath, mantener datos de SET
+        facturaExistente.proceso = null;
+        facturaExistente.kudePath = null;
+        await facturaExistente.save();
+
+        // Encolar SOLO generación de PDF
+        const kudeQueue = require('../queues/facturaQueue').kudeQueue;
+        const job = await kudeQueue.add('generar-kude', {
+          facturaId: facturaExistente._id.toString(),
+          xmlPath: facturaExistente.xmlPath,
+          cdc: facturaExistente.cdc,
+          correlativo: facturaExistente.correlativo,
+          fechaCreacion: facturaExistente.fechaCreacion,
+          datosFactura: facturaExistente.datosFactura,
+          empresaId: facturaExistente.empresaId?.toString()
+        }, {
+          priority: 1
+        });
+
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        return res.status(202).json({
+          success: true,
+          message: 'PDF encolado para regeneración (factura ya aprobada por SET)',
+          data: {
+            facturaId: facturaExistente._id,
+            correlativo: facturaExistente.correlativo,
+            estado: facturaExistente.estadoSifen,  // Mantiene aceptado/observado
+            proceso: null,
+            cdc: facturaExistente.cdc,
+            kudeJobId: job.id,
+            xmlLink: `${baseUrl}/api/invoices/${facturaExistente._id}/download-xml`,
+            kudeLink: `${baseUrl}/api/invoices/${facturaExistente._id}/download-pdf`
+          }
+        });
+      }
+
+      // Factura aprobada por SET y proceso completado → NO permitir recreación
+      if (estaAprobada && facturaExistente.proceso !== 'No completado') {
         return res.status(409).json({
           success: false,
-          error: 'Factura duplicada',
-          mensaje: 'La factura con estos datos ya ha sido registrada y completada previamente',
+          error: 'Factura ya aprobada por SET',
+          mensaje: `La factura ya tiene estado "${facturaExistente.estadoSifen}" en SET. Los archivos (XML/PDF) ya están generados.`,
           facturaId: facturaExistente._id,
           detalles: {
             fechaCreacion: facturaExistente.fechaCreacion,
@@ -150,8 +194,8 @@ router.post('/crear', async (req, res) => {
         });
       }
 
-      // Si el proceso está en null o 'Fallido', permitir recreación actualizando el registro existente
-      console.log(`🔄 Factura ${facturaExistente._id} con proceso '${facturaExistente.proceso}' - Permitiendo recreación`);
+      // Si el proceso está en null o 'No completado' (y NO aprobada por SET), permitir recreación completa
+      console.log(`🔄 Factura ${facturaExistente._id} con proceso '${facturaExistente.proceso}' y estado '${facturaExistente.estadoSifen}' - Permitiendo recreación`);
 
       // Actualizar factura existente con nuevos datos
       facturaExistente.datosFactura = datosFactura;
@@ -283,7 +327,7 @@ router.post('/crear', async (req, res) => {
         facturaId: invoice._id,
         correlativo: correlativoCompleto,
         estado: 'encolado',
-        proceso: null,  // Nuevo campo: null = pendiente, 'Terminado' = completado, 'Fallido' = error
+        proceso: null,  // Nuevo campo: null = pendiente, 'Completado' = completado, 'No completado' = error
         jobId: job.id,
         // Campos que se completarán después del procesamiento
         cdc: null,  // Se genera cuando SET aprueba la factura

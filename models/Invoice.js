@@ -92,7 +92,7 @@ const invoiceSchema = new mongoose.Schema({
   // Estado visual para el frontend (según código de retorno)
   estadoVisual: {
     type: String,
-    enum: ['aceptado', 'observado', 'rechazado'],
+    enum: ['aceptado', 'observado', 'rechazado', 'error'],
     default: 'rechazado'
   },
   kudePath: {
@@ -113,7 +113,7 @@ const invoiceSchema = new mongoose.Schema({
   // Permite recrear factura cuando XML/PDF no se completó
   proceso: {
     type: String,
-    enum: ['Terminado', 'Fallido', null],
+    enum: ['Completado', 'No completado', null],
     default: null,
     index: true
   }

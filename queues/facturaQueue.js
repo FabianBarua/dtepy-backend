@@ -21,10 +21,10 @@ const redisConfig = {
 const facturaQueue = new Queue('facturacion', {
   redis: redisConfig,
   defaultJobOptions: {
-    attempts: 3,  // Reintentos si falla
+    attempts: 1,  // Sin reintentos automáticos (errores de validación no se resuelven reintentando)
     backoff: {
       type: 'exponential',
-      delay: 1000  // 1s, 2s, 4s entre reintentos
+      delay: 1000
     },
     removeOnComplete: {
       count: 100  // Mantener últimos 100 jobs completados
@@ -40,7 +40,7 @@ const facturaQueue = new Queue('facturacion', {
 const kudeQueue = new Queue('kude', {
   redis: redisConfig,
   defaultJobOptions: {
-    attempts: 2,
+    attempts: 1,  // Sin reintentos automáticos
     backoff: {
       type: 'fixed',
       delay: 2000
@@ -69,6 +69,7 @@ facturaQueue.on('completed', (job, result) => {
 facturaQueue.on('failed', (job, err) => {
   console.error(`❌ [FACTURA] Job ${job.id} falló: ${err.message}`);
   console.error(`   Datos: RUC=${job.data?.datosFactura?.ruc}, Numero=${job.data?.datosFactura?.numero}`);
+  console.error(`   Reintentar desde el frontend corrigiendo los datos`);
 });
 
 // Job en espera
@@ -83,7 +84,7 @@ facturaQueue.on('active', (job) => {
 
 // Job estancado (stalled)
 facturaQueue.on('stalled', (jobId) => {
-  console.warn(`⚠️ [FACTURA] Job ${jobId} estancado - se reintentará`);
+  console.warn(`⚠️ [FACTURA] Job ${jobId} estancado - no se reintentará automáticamente`);
 });
 
 // Error en la cola

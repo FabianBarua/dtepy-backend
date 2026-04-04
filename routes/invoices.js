@@ -83,7 +83,7 @@ router.get('/:id', async (req, res) => {
         correlativo: invoice.correlativo,
         cdc: invoice.cdc || null,
         estado: invoice.estadoSifen,
-        proceso: invoice.proceso || null,  // Nuevo campo: null = pendiente, 'Terminado' = completado, 'Fallido' = error
+        proceso: invoice.proceso || null,  // Nuevo campo: null = pendiente, 'Completado' = completado, 'No completado' = error
         estadoVisual: invoice.estadoVisual || 'rechazado',
         esEstadoFinal: esEstadoFinal,
         recomendarRefresh: recomendarRefresh,
@@ -205,15 +205,27 @@ router.post('/:id/retry', async (req, res) => {
     // ========================================
     // LÓGICA DE REENVÍO:
     // 1. Leer el XML original desde el archivo
-    // 2. Volver a enviar a la SET
-    // 3. Actualizar el estado según la respuesta
+    // 2. Verificar si ya tiene estado final en BD (evitar reenvío innecesario)
+    // 3. Volver a enviar a la SET solo si es necesario
+    // 4. Actualizar el estado según la respuesta
     // ========================================
-    
+
     // Verificar que existe el archivo XML
     if (!invoice.xmlPath || !fs.existsSync(path.join(__dirname, '../de_output', invoice.xmlPath))) {
       return res.status(400).json({
         message: 'No se puede reenviar: XML no encontrado',
         detalle: 'El archivo XML de esta factura no existe en el servidor'
+      });
+    }
+
+    // VALIDACIÓN: No reenviar a SET si la factura ya tiene estado final aprobado
+    const estadosFinales = ['aceptado', 'observado'];
+    if (estadosFinales.includes(invoice.estadoSifen) && invoice.cdc) {
+      return res.status(400).json({
+        message: 'No es necesario reenviar a SET',
+        detalle: `La factura ya tiene estado "${invoice.estadoSifen}" en la base de datos. Si necesitas actualizar el estado, usa "Consultar Estado" en lugar de "Reintentar".`,
+        estadoActual: invoice.estadoSifen,
+        cdc: invoice.cdc
       });
     }
 
@@ -223,7 +235,7 @@ router.post('/:id/retry', async (req, res) => {
 
     // Extraer el CDC de la factura
     const cdc = invoice.cdc;
-    
+
     if (!cdc) {
       return res.status(400).json({
         message: 'No se puede reenviar: CDC no encontrado',
@@ -319,7 +331,7 @@ router.post('/:id/retry', async (req, res) => {
       console.error('❌ Error al reenviar:', error.message);
 
       invoice.estadoSifen = 'error';
-      invoice.estadoVisual = 'rechazado';
+      invoice.estadoVisual = 'error';
       invoice.mensajeRetorno = `Error al reenviar: ${error.message}`;
       await invoice.save();
 

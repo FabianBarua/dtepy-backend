@@ -363,14 +363,22 @@ async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactur
     const jsonPDF = JSON.stringify(jsonParam);
 
     // ========================================
+    // CONVERTIR RUTA RELATIVA A ABSOLUTA SI ES NECESARIO
+    // ========================================
+    if (xmlPath && !path.isAbsolute(xmlPath)) {
+      xmlPath = path.join(__dirname, '../de_output', xmlPath);
+    }
+    console.log('📁 Ruta XML:', xmlPath);
+
+    // ========================================
     // CREAR ARCHIVO TEMPORAL SIN ESPACIOS PARA EL JAR
     // ========================================
-    // Crear nombre temporal SIN espacios ni caracteres especiales
-    const nombreTemporal = `xml_temp_${Date.now()}.xml`;
+    // Crear nombre temporal UNICO: timestamp + random para evitar colisiones concurrentes
+    const nombreTemporal = `xml_temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.xml`;
     const dirTemporal = path.dirname(xmlPath);
     const rutaTemporal = path.join(dirTemporal, nombreTemporal);
     let archivoTemporal = null;
-    
+
     // Copiar el archivo a un nombre temporal sin espacios
     try {
       fs.copyFileSync(xmlPath, rutaTemporal);
@@ -380,17 +388,19 @@ async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactur
       throw err;
     }
 
-    // El JAR genera el PDF con su propio nombre basado en el XML
-    const rutaParaJAR = archivoTemporal;
-    await kude.generateKUDE(java8Path, rutaParaJAR, srcJasper, destFolder, JSON.stringify(jsonPDF));
-
-    // Limpiar archivo temporal
-    if (archivoTemporal && fs.existsSync(archivoTemporal)) {
-      try {
-        fs.unlinkSync(archivoTemporal);
-        console.log('🧹 Archivo temporal eliminado');
-      } catch (err) {
-        // Ignorar error al limpiar
+    try {
+      // El JAR genera el PDF con su propio nombre basado en el XML
+      const rutaParaJAR = archivoTemporal;
+      await kude.generateKUDE(java8Path, rutaParaJAR, srcJasper, destFolder, JSON.stringify(jsonPDF));
+    } finally {
+      // Limpiar archivo temporal SIEMPRE (éxito o error)
+      if (archivoTemporal && fs.existsSync(archivoTemporal)) {
+        try {
+          fs.unlinkSync(archivoTemporal);
+          console.log('🧹 Archivo temporal eliminado:', archivoTemporal);
+        } catch (err) {
+          console.warn('⚠️ No se pudo eliminar archivo temporal:', err.message);
+        }
       }
     }
 

@@ -9,8 +9,8 @@ Se agregó el campo `proceso` al modelo `Invoice` para permitir la recreación d
 | Valor | Significado | Cuándo se asigna |
 |-------|-------------|------------------|
 | `null` | Pendiente de procesar | Al crear la factura o al reintentar |
-| `Terminado` | Proceso completado exitosamente | Cuando **XML y PDF** existen físicamente |
-| `Fallido` | Proceso falló | Cuando **XML o PDF** no se generaron correctamente |
+| `Completado` | Proceso completado exitosamente | Cuando **XML y PDF** existen físicamente |
+| `No completado` | Proceso falló | Cuando **XML o PDF** no se generaron correctamente |
 
 ## Comportamiento del Sistema
 
@@ -19,33 +19,33 @@ Se agregó el campo `proceso` al modelo `Invoice` para permitir la recreación d
 El worker verifica la existencia física de los archivos en dos etapas:
 
 ```
-Worker Factura → Genera XML → ¿XML existe? → NO → proceso: 'Fallido'
+Worker Factura → Genera XML → ¿XML existe? → NO → proceso: 'No completado'
                               ↓ SÍ
                               ↓
                               Encola KUDE
                               ↓
-Worker KUDE → Genera PDF → ¿PDF existe? → NO → proceso: 'Fallido'
+Worker KUDE → Genera PDF → ¿PDF existe? → NO → proceso: 'No completado'
                          ↓ SÍ
                          ↓
-                         ¿XML también existe? → NO → proceso: 'Fallido'
+                         ¿XML también existe? → NO → proceso: 'No completado'
                          ↓ SÍ
                          ↓
-                         proceso: 'Terminado'
+                         proceso: 'Completado'
 ```
 
-### Criterio para `proceso: 'Terminado'`
+### Criterio para `proceso: 'Completado'`
 
 **AMBOS archivos deben existir físicamente:**
 - ✅ XML en `invoice.xmlPath`
 - ✅ PDF en `invoice.kudePath`
 
-Si falta alguno, el proceso se marca como `Fallido` para permitir reintentar.
+Si falta alguno, el proceso se marca como `No completado` para permitir reintentar.
 
 ## Comportamiento del Sistema
 
 ### Al Crear una Factura Nueva
 
-1. Se calcula el `facturaHash` con los datos de la factura
+1. Se calcula el `facturaHash` con los datos de la factura: **RUC + Código Seguridad Aleatorio + Número**
 2. Se busca si existe una factura con ese hash
 3. Si no existe → Se crea con `proceso: null`
 
@@ -53,7 +53,7 @@ Si falta alguno, el proceso se marca como `Fallido` para permitir reintentar.
 
 El sistema verifica el campo `proceso` de la factura existente:
 
-#### Si `proceso === 'Terminado'`
+#### Si `proceso === 'Completado'`
 ```
 ❌ RECHAZA - Factura ya completada
 HTTP 409 Conflict
@@ -64,7 +64,7 @@ HTTP 409 Conflict
 }
 ```
 
-#### Si `proceso === 'Fallido'` o `proceso === null`
+#### Si `proceso === 'No completado'` o `proceso === null`
 ```
 ✅ PERMITE REINTENTO
 - Actualiza la factura existente con nuevos datos
@@ -82,8 +82,8 @@ POST /api/facturar/crear
 ¿Existe factura con mismo hash?
     ├── NO → Crear nueva con proceso: null
     └── SÍ → Verificar campo proceso
-             ├── 'Terminado' → Rechazar (409 Conflict)
-             └── 'Fallido' o null → Reintentar
+             ├── 'Completado' → Rechazar (409 Conflict)
+             └── 'No completado' o null → Reintentar
                                     ↓
                                     Actualizar factura existente
                                     ↓
@@ -98,16 +98,16 @@ Worker procesa factura
 Genera XML
     ↓
 ¿XML existe físicamente?
-    ├── NO → proceso: 'Fallido'
+    ├── NO → proceso: 'No completado'
     └── SÍ → Encola KUDE
              ↓
              Worker KUDE genera PDF
              ↓
              ¿PDF existe físicamente?
-                 ├── NO → proceso: 'Fallido'
+                 ├── NO → proceso: 'No completado'
                  └── SÍ → ¿XML también existe?
-                          ├── NO → proceso: 'Fallido'
-                          └── SÍ → proceso: 'Terminado'
+                          ├── NO → proceso: 'No completado'
+                          └── SÍ → proceso: 'Completado'
 ```
 
 ## Migración de Datos
@@ -120,8 +120,8 @@ node migrations/001-agregar-campo-proceso.js
 ```
 
 La migración asigna basándose en el estado SIFEN (criterio aproximado):
-- `'Terminado'` → Facturas con estado `aceptado` u `observado` (asume que XML/PDF existen)
-- `'Fallido'` → Facturas con estado `rechazado` o `error`
+- `'Completado'` → Facturas con estado `aceptado` u `observado` (asume que XML/PDF existen)
+- `'No completado'` → Facturas con estado `rechazado` o `error`
 - `null` → Resto de estados (`encolado`, `procesando`, `enviado`, `recibido`)
 
 > **Nota:** La migración usa el estado SIFEN como aproximación porque no puede verificar si los archivos existen físicamente. El worker corregirá el valor durante el próximo procesamiento si es necesario.
@@ -132,31 +132,31 @@ La migración asigna basándose en el estado SIFEN (criterio aproximado):
 ```
 1. Usuario envía factura → Error en xmlgen → XML no se genera
 2. Worker verifica: ¿XML existe? → NO
-3. Worker marca: proceso: 'Fallido'
+3. Worker marca: proceso: 'No completado'
 4. Usuario corrige datos y reenvía
-5. Sistema detecta mismo hash pero proceso: 'Fallido'
+5. Sistema detecta mismo hash pero proceso: 'No completado'
 6. Permite reintentar → Reutiliza mismo ID
 7. Nueva ejecución → XML generado → PDF generado
 8. Worker KUDE verifica: ¿XML y PDF existen? → SÍ
-9. Marca: proceso: 'Terminado'
+9. Marca: proceso: 'Completado'
 ```
 
 ### Caso 2: Error en Generación de PDF (KUDE)
 ```
 1. Usuario envía factura → XML generado exitosamente
 2. Worker KUDE intenta generar PDF → Error en kudegen
-3. PDF no se genera → Worker KUDE marca: proceso: 'Fallido'
+3. PDF no se genera → Worker KUDE marca: proceso: 'No completado'
 4. Usuario reenvía misma factura
-5. Sistema permite reintentar (proceso: 'Fallido')
+5. Sistema permite reintentar (proceso: 'No completado')
 6. Nueva ejecución → XML y PDF generados exitosamente
-7. Worker KUDE verifica ambos archivos → proceso: 'Terminado'
+7. Worker KUDE verifica ambos archivos → proceso: 'Completado'
 ```
 
 ### Caso 3: Factura Ya Procesada Exitosamente
 ```
-1. Usuario envía factura → XML y PDF generados → proceso: 'Terminado'
+1. Usuario envía factura → XML y PDF generados → proceso: 'Completado'
 2. Usuario intenta reenviar misma factura (mismo hash)
-3. Sistema verifica: proceso = 'Terminado'
+3. Sistema verifica: proceso = 'Completado'
 4. Rechaza (409 Conflict) → "Factura ya completada"
 5. Retorna datos de la factura original
 ```
@@ -165,7 +165,7 @@ La migración asigna basándose en el estado SIFEN (criterio aproximado):
 ```
 1. Usuario envía factura → Timeout en conexión a SET
 2. XML se guardó pero no se confirmó el estado
-3. Worker no puede verificar XML → proceso: 'Fallido' (o mantiene null)
+3. Worker no puede verificar XML → proceso: 'No completado' (o mantiene null)
 4. Usuario reenvía → Sistema permite reintentar
 ```
 
@@ -195,14 +195,25 @@ Cuando se permite un reintento, se resetean los siguientes campos:
 
 El `facturaHash` mantiene su restricción `unique: true` en MongoDB. Esto previene duplicados accidentales mientras permite reintentos controlados mediante el campo `proceso`.
 
+### Composición del `facturaHash`
+
+El hash se genera a partir de:
+```
+SHA256(RUC + "|" + CodigoSeguridadAleatorio + "|" + Numero)
+```
+
+Ejemplo: `80012345|ABC123|60` → `sha256` → hash hex
+
+Esto significa que dos facturas con el mismo **RUC**, **código de seguridad** y **número** se consideran duplicadas.
+
 ## Consultas Útiles
 
 ```javascript
 // Ver facturas con proceso fallido (permiten reintentar)
-Invoice.find({ proceso: 'Fallido' })
+Invoice.find({ proceso: 'No completado' })
 
 // Ver facturas completadas (no permiten reintentar)
-Invoice.find({ proceso: 'Terminado' })
+Invoice.find({ proceso: 'Completado' })
 
 // Ver facturas pendientes de procesar
 Invoice.find({ proceso: null })
@@ -220,7 +231,7 @@ Invoice.aggregate([
 3. **routes/invoices.js** - Agregado campo `proceso` en respuesta de API
 4. **workers/facturaWorker.js** - Verifica existencia de XML y PDF para actualizar `proceso`:
    - Worker Factura: Verifica XML después de generar
-   - Worker KUDE: Verifica PDF y XML antes de marcar 'Terminado'
+   - Worker KUDE: Verifica PDF y XML antes de marcar 'Completado'
 5. **server.js** - Agregado campo `proceso` en todas las respuestas de API
 6. **migrations/001-agregar-campo-proceso.js** - Script de migración para datos existentes
 7. **frontend/src/components/InvoiceListView.vue** - Columna 'Proceso' en tabla de facturas

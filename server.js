@@ -204,7 +204,7 @@ app.get('/api/invoices', async (req, res) => {
         correlativo: f.correlativo,
         cdc: f.cdc,
         estadoSifen: f.estadoSifen,
-        proceso: f.proceso,  // Nuevo campo: null = pendiente, 'Terminado' = completado, 'Fallido' = error
+        proceso: f.proceso,  // Nuevo campo: null = pendiente, 'Completado' = completado, 'No completado' = error
         fechaCreacion: f.fechaCreacion,
         fechaEnvio: f.fechaEnvio,
         total: f.total,

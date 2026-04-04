@@ -56,13 +56,6 @@ facturaQueue.process('generar-factura', async (job) => {
     invoice.estadoSifen = 'procesando';
     await invoice.save();
     
-    await OperationLog.create({
-      invoiceId: invoice._id,
-      tipoOperacion: 'inicio_proceso',  // ← Valor válido del enum
-      descripcion: 'Worker iniciando procesamiento de factura',
-      estado: 'success'  // ← Valor válido del enum
-    });
-    
     await job.progress(20);
 
     // ========================================
@@ -100,14 +93,14 @@ facturaQueue.process('generar-factura', async (job) => {
     const xmlExiste = xmlPathAbsoluta && fs.existsSync(xmlPathAbsoluta);
 
     if (!xmlExiste) {
-      // XML no se generó o no existe → Marcar como Fallido
-      invoice.proceso = 'Fallido';
+      // XML no se generó o no existe → Marcar como Incompletado
+      invoice.proceso = 'No completado';
       console.error(`❌ [WORKER] XML no existe en ${xmlPathAbsoluta}`);
     } else {
       // XML existe → Mantener proceso en null (se marcará después de generar PDF)
       console.log(`✅ [WORKER] XML verificado en ${xmlPathAbsoluta}`);
     }
-    // Si el XML existe, NO marcamos 'Terminado' todavía
+    // Si el XML existe, NO marcamos 'Completado' todavía
     // Se marcará después de que el PDF se genere exitosamente
 
     await invoice.save();
@@ -211,7 +204,8 @@ facturaQueue.process('generar-factura', async (job) => {
     // Actualizar factura con error
     if (invoice) {
       invoice.estadoSifen = 'error';
-      invoice.proceso = 'Fallido';  // Marcar como fallido para permitir reintentar
+      invoice.estadoVisual = 'error';  // Para que se muestre rojo como "error" en frontend
+      invoice.proceso = 'No completado';  // Marcar como incompletado para permitir reintentar
       invoice.mensajeRetorno = error.message;
       await invoice.save();
 
@@ -265,20 +259,20 @@ kudeQueue.process('generar-kude', async (job) => {
 
         if (xmlExiste) {
           // Ambos archivos existen → Proceso completado exitosamente
-          invoice.proceso = 'Terminado';
-          console.log(`✅ [KUDE] PDF guardado: ${pdfPath} | XML: ${xmlPathAbsoluta} | Proceso: TERMINADO`);
+          invoice.proceso = 'Completado';
+          console.log(`✅ [KUDE] PDF guardado: ${pdfPath} | XML: ${xmlPathAbsoluta} | Proceso: COMPLETADO`);
         } else {
-          // PDF existe pero XML no → Fallido
-          invoice.proceso = 'Fallido';
-          console.error(`❌ [KUDE] PDF guardado pero XML no existe en ${xmlPathAbsoluta} | Proceso: FALLIDO`);
+          // PDF existe pero XML no → Incompletado
+          invoice.proceso = 'No completado';
+          console.error(`❌ [KUDE] PDF guardado pero XML no existe en ${xmlPathAbsoluta} | Proceso: INCOMPLETADO`);
         }
 
         await invoice.save();
       } else {
-        // PDF no se pudo generar → Marcar como Fallido
-        invoice.proceso = 'Fallido';
+        // PDF no se pudo generar → Marcar como Incompletado
+        invoice.proceso = 'No completado';
         await invoice.save();
-        console.error(`❌ [KUDE] No se pudo generar el PDF | Proceso: FALLIDO`);
+        console.error(`❌ [KUDE] No se pudo generar el PDF | Proceso: INCOMPLETADO`);
       }
     }
 
@@ -286,11 +280,11 @@ kudeQueue.process('generar-kude', async (job) => {
 
   } catch (error) {
     console.error(`❌ [KUDE] Error generando PDF: ${error.message}`);
-    
-    // Marcar factura como Fallido si hay error
+
+    // Marcar factura como Incompletado si hay error
     const invoice = await Invoice.findById(facturaId);
     if (invoice) {
-      invoice.proceso = 'Fallido';
+      invoice.proceso = 'No completado';
       await invoice.save();
     }
     

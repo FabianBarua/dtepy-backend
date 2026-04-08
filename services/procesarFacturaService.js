@@ -355,8 +355,10 @@ async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactur
                                   empresa.ruc,
                                   fechaCreacion.getFullYear().toString(),
                                   String(fechaCreacion.getMonth() + 1).padStart(2, '0'), '/');
+                                  
+    const env = empresa.configuracionSifen.modo;
     const jsonParam = {
-      ambiente: "1",
+      ambiente: env == "produccion" ? "0" : "1",
       LOGO_URL: empresa?.configuracionSifen?.urlLogo || "https://lrtv.jaranetwork.com/sites/default/files/styles/poster/public/logos/hit.png?itok=UHWpjKPdd",
       active: true
     };

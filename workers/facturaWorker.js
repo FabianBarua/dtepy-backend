@@ -76,6 +76,7 @@ facturaQueue.process('generar-factura', async (job) => {
     invoice.digestValue = resultado.digestValue;
     invoice.fechaProceso = resultado.fechaProceso;
     invoice.xmlPath = resultado.xmlPath;
+    invoice.xmlContent = resultado.xmlContent;  // XML firmado con QR antes de enviar a SET
     // Respetar fechaEnvio del JSON si existe, sino usar fecha actual
     const data = datosFactura.data || datosFactura;
     if (data.factura?.fechaEnvio) {

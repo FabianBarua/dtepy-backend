@@ -100,7 +100,8 @@ router.get('/:id', async (req, res) => {
         mensajeRetorno: invoice.mensajeRetorno,
         digestValue: invoice.digestValue,
         qrCode: invoice.qrCode,
-        datosFactura: invoice.datosFactura || null
+        datosFactura: invoice.datosFactura || null,
+        xmlContent: invoice.xmlContent || null
       }
     });
   } catch (error) {

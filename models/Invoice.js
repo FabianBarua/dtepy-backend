@@ -102,6 +102,9 @@ const invoiceSchema = new mongoose.Schema({
     type: Object,
     default: {}
   },
+  xmlContent: {
+    type: String  // Contenido del XML firmado con QR antes de enviar a SET
+  },
   facturaHash: {
     type: String,
     required: true,

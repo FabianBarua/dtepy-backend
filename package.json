@@ -34,7 +34,7 @@
     "facturacionelectronicapy-kude": "^1.0.18",
     "facturacionelectronicapy-qrgen": "^1.0.9",
     "facturacionelectronicapy-setapi": "^1.0.34",
-    "facturacionelectronicapy-xmlgen": "^1.0.277",
+    "facturacionelectronicapy-xmlgen": "^1.0.280",
     "facturacionelectronicapy-xmlsign": "^1.0.28",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",

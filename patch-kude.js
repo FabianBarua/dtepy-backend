@@ -29,10 +29,11 @@ try {
 }
 
 // ========================================
-// PARCHE 0.1: Reemplazar archivos .jasper de Nota Crédito y Nota Débito
+// PARCHE 0.1: Reemplazar archivos .jasper
 //             (Corrección: número CDC completo en el PDF)
 // ========================================
 const jasperFiles = [
+  'Factura.jasper',
   'NotaCredito.jasper',
   'NotaDebito.jasper'
 ];

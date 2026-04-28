@@ -11,6 +11,18 @@ const { facturaQueue } = require('../queues/facturaQueue');
 const { verificarToken } = require('../middleware/auth');
 const { normalizarFechasEnObjeto, normalizarDatetime } = require('../utils/fechaUtils');
 
+// Mapeo de códigos de tipo de documento a descripciones para el campo DE
+const tiposDocumentoMap = {
+  1: 'Factura electrónica',
+  2: 'Factura electrónica de exportación',
+  3: 'Factura electrónica de importación',
+  4: 'Autofactura electrónica',
+  5: 'Nota de crédito electrónica',
+  6: 'Nota de débito electrónica',
+  7: 'Nota de remisión electrónica',
+  8: 'Comprobante de retención electrónico'
+};
+
 // Todas las rutas requieren autenticación
 router.use(verificarToken);
 
@@ -197,11 +209,16 @@ router.post('/crear', async (req, res) => {
       // Si el proceso está en null o 'No completado' (y NO aprobada por SET), permitir recreación completa
       console.log(`🔄 Factura ${facturaExistente._id} con proceso '${facturaExistente.proceso}' y estado '${facturaExistente.estadoSifen}' - Permitiendo recreación`);
 
+      // Extraer DE (descripción del tipo de documento) basado en el código de tipoDocumento
+      const tipoDocumentoCodigo = datosFactura.data?.tipoDocumento || datosFactura.tipoDocumento;
+      const deDescripcion = tiposDocumentoMap[tipoDocumentoCodigo] || 'Factura electrónica';
+
       // Actualizar factura existente con nuevos datos
       facturaExistente.datosFactura = datosFactura;
       facturaExistente.estadoSifen = 'encolado';
       facturaExistente.proceso = null;  // Resetear para nuevo intento
       facturaExistente.fechaCreacion = new Date();
+      facturaExistente.de = deDescripcion;  // Actualizar campo DE
       // Limpiar campos de proceso anterior
       facturaExistente.cdc = null;
       facturaExistente.xmlPath = null;
@@ -270,31 +287,36 @@ router.post('/crear', async (req, res) => {
     // ========================================
     // CREAR REGISTRO EN BD (ESTADO: ENCOLADO)
     // ========================================
-    // Obtener datos del cliente (soportar ambas estructuras: param/data y plana)
-    const cliente = datosFactura.data?.cliente || datosFactura.cliente || {};
+     // Obtener datos del cliente (soportar ambas estructuras: param/data y plana)
+     const cliente = datosFactura.data?.cliente || datosFactura.cliente || {};
 
-    const invoice = new Invoice({
-      empresaId: empresa._id,
-      rucEmpresa: empresa.ruc,
-      correlativo: correlativoCompleto,
-      cliente: {
-        ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
-        nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
-        razonSocial: cliente.razonSocial,
-        nombreFantasia: cliente.nombreFantasia,
-        direccion: cliente.direccion,
-        telefono: cliente.telefono,
-        email: cliente.email,
-        documentoTipo: cliente.documentoTipo,
-        documentoNumero: cliente.documentoNumero
-      },
-      total: totalFactura,
-      fechaCreacion: new Date(),
-      estadoSifen: 'encolado',
-      proceso: null,  // Nuevo campo: null = pendiente de procesar
-      datosFactura: datosFactura,
-      facturaHash: facturaHash
-    });
+     // Extraer DE (descripción del tipo de documento) basado en el código de tipoDocumento
+     const tipoDocumentoCodigo = datosFactura.data?.tipoDocumento || datosFactura.tipoDocumento;
+     const deDescripcion = tiposDocumentoMap[tipoDocumentoCodigo] || 'Factura electrónica';
+
+     const invoice = new Invoice({
+       empresaId: empresa._id,
+       rucEmpresa: empresa.ruc,
+       correlativo: correlativoCompleto,
+       cliente: {
+         ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
+         nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
+         razonSocial: cliente.razonSocial,
+         nombreFantasia: cliente.nombreFantasia,
+         direccion: cliente.direccion,
+         telefono: cliente.telefono,
+         email: cliente.email,
+         documentoTipo: cliente.documentoTipo,
+         documentoNumero: cliente.documentoNumero
+       },
+       total: totalFactura,
+       fechaCreacion: new Date(),
+       estadoSifen: 'encolado',
+       proceso: null,  // Nuevo campo: null = pendiente de procesar
+       datosFactura: datosFactura,
+       facturaHash: facturaHash,
+       de: deDescripcion  // Nuevo campo: descripción del tipo de documento
+     });
 
     await invoice.save();
     console.log(`📦 Factura creada en BD: ${invoice._id} (estado: encolado)`);

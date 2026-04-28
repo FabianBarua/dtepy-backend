@@ -119,6 +119,14 @@ const invoiceSchema = new mongoose.Schema({
     enum: ['Completado', 'No completado', null],
     default: null,
     index: true
+  },
+  // ========================================
+  // CAMPO DE (DESCRIPCIÓN DEL TIPO DE DOCUMENTO)
+  // ========================================
+  de: {
+    type: String,
+    required: false,
+    default: 'Factura electrónica'
   }
 }, {
   timestamps: true

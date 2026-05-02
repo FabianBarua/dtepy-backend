@@ -17,11 +17,14 @@ router.use(verificarToken);
 // Obtener todas las facturas
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 10, estado } = req.query;
+    const { page = 1, limit = 10, estado, rucEmpresa } = req.query;
 
     const query = {};
     if (estado) {
       query.estadoSifen = estado;
+    }
+    if (rucEmpresa) {
+      query.rucEmpresa = rucEmpresa;
     }
 
     const invoices = await Invoice.find(query)
@@ -39,7 +42,8 @@ router.get('/', async (req, res) => {
         ...invoiceObj,
         estado: invoice.estadoSifen,
         estadoVisual: invoice.estadoVisual || 'rechazado',
-        codigoRetorno: invoice.codigoRetorno || null
+        codigoRetorno: invoice.codigoRetorno || null,
+        de: invoice.de || 'Factura electrónica'
       };
     });
 
@@ -101,7 +105,8 @@ router.get('/:id', async (req, res) => {
         digestValue: invoice.digestValue,
         qrCode: invoice.qrCode,
         datosFactura: invoice.datosFactura || null,
-        xmlContent: invoice.xmlContent || null
+        xmlContent: invoice.xmlContent || null,
+        de: invoice.de || 'Factura electrónica'
       }
     });
   } catch (error) {

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 const Invoice = require('../models/Invoice');
 const OperationLog = require('../models/OperationLog');
 const { verificarToken } = require('../middleware/auth');
@@ -17,7 +18,7 @@ router.use(verificarToken);
 // Obtener todas las facturas
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 10, estado, rucEmpresa } = req.query;
+    const { page = 1, limit = 10, estado, rucEmpresa, search, searchType } = req.query;
 
     const query = {};
     if (estado) {
@@ -25,6 +26,31 @@ router.get('/', async (req, res) => {
     }
     if (rucEmpresa) {
       query.rucEmpresa = rucEmpresa;
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      switch (searchType) {
+        case 'ruc':
+          query['cliente.ruc'] = searchRegex;
+          break;
+        case 'nombre':
+          query['cliente.nombre'] = searchRegex;
+          break;
+        case 'cdc':
+          query.cdc = searchRegex;
+          break;
+        case 'tipo':
+          query.de = searchRegex;
+          break;
+        case 'id':
+          if (mongoose.Types.ObjectId.isValid(search)) {
+            query._id = search;
+          } else {
+            query._id = null;
+          }
+          break;
+      }
     }
 
     const invoices = await Invoice.find(query)

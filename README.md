@@ -1,4 +1,4 @@
-# FEPY Backend - Sistema de Facturación Electrónica SIFEN
+# DTE-PY Backend - Sistema de Facturación Electrónica SIFEN
 
 Proyecto backend del sistema de facturación electrónica para Paraguay (SIFEN) con procesamiento asíncrono mediante colas de trabajo.
 
@@ -317,8 +317,8 @@ El sistema usa **API Keys** para autenticación:
 
 ## Proyectos
 
-- [FEPY frontend](https://github.com/jaranetwork/fepy-frontend) Interface web
-- [Módulo ERPNext](https://github.com/jaranetwork/einvoice) para el envío de facturas a FEPY
+- [DTE-PY frontend](https://github.com/jaranetwork/fepy-frontend) Interface web
+- [Módulo ERPNext](https://github.com/jaranetwork/einvoice) para el envío de facturas a DTE-PY
 
 ## 📚 Recursos
 

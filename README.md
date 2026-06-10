@@ -113,6 +113,7 @@ Authorization: Bearer <API_KEY>
   },
   
   "data": {
+    "templateFactura" : "normal",
     "tipoDocumento" : 1,
     "establecimiento" : "001",
     "codigoSeguridadAleatorio" : "298398",

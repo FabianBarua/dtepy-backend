@@ -30,10 +30,11 @@ try {
 
 // ========================================
 // PARCHE 0.1: Reemplazar archivos .jasper
-//             (Corrección: número CDC completo en el PDF)
+//             (Plantillas personalizadas: Factura, Factura-Ticket, etc.)
 // ========================================
 const jasperFiles = [
   'Factura.jasper',
+  'Factura-Ticket.jasper',
   'NotaCredito.jasper',
   'NotaDebito.jasper'
 ];

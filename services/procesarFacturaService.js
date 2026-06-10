@@ -360,7 +360,8 @@ async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactur
     const jsonParam = {
       ambiente: env == "produccion" ? "0" : "1",
       LOGO_URL: empresa?.configuracionSifen?.urlLogo || "https://res.cloudinary.com/dficj0aam/image/upload/v1775702075/invoice_axiuol.png",
-      active: true
+      active: true,
+      template: datosFactura?.data?.templateFactura || datosFactura?.templateFactura || "normal"
     };
     const jsonPDF = JSON.stringify(jsonParam);
 

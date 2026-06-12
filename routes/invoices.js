@@ -132,7 +132,9 @@ router.get('/:id', async (req, res) => {
         qrCode: invoice.qrCode,
         datosFactura: invoice.datosFactura || null,
         xmlContent: invoice.xmlContent || null,
-        de: invoice.de || 'Factura electrónica'
+        de: invoice.de || 'Factura electrónica',
+        tipoEmision: invoice.tipoEmision || 1,
+        grupoLoteId: invoice.grupoLoteId || null
       }
     });
   } catch (error) {

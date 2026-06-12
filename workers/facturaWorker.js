@@ -139,6 +139,10 @@ facturaQueue.process('generar-factura', async (job) => {
       tipoOperacion = 'respuesta_sifen';
       descripcion = `Factura en procesamiento - CDC: ${resultado.cdc}`;
       estadoLog = 'success';
+    } else if (resultado.estado === 'encolado') {
+      tipoOperacion = 'encolado_lote';
+      descripcion = `Factura encolada para envío por lote - CDC: ${resultado.cdc}`;
+      estadoLog = 'success';
     }
 
     await OperationLog.create({
@@ -149,7 +153,9 @@ facturaQueue.process('generar-factura', async (job) => {
       detalle: {
         estadoSifen: resultado.estado,
         estadoVisual: resultado.estadoVisual,
-        codigoRetorno: resultado.codigoRetorno
+        codigoRetorno: resultado.codigoRetorno,
+        tipoEmision: resultado.tipoEmision,
+        tipoDocumento: resultado.tipoDocumento
       }
     });
 
@@ -161,6 +167,8 @@ facturaQueue.process('generar-factura', async (job) => {
       console.log(`❌ [WORKER] Factura ${facturaId} con error - CDC: ${resultado.cdc}, Código: ${resultado.codigoRetorno}`);
     } else if (resultado.estado === 'observado') {
       console.log(`⚠️ [WORKER] Factura ${facturaId} observada - CDC: ${resultado.cdc}, Código: ${resultado.codigoRetorno}`);
+    } else if (resultado.estado === 'encolado') {
+      console.log(`📦 [WORKER] Factura ${facturaId} encolada para lote - CDC: ${resultado.cdc}`);
     } else {
       console.log(`📋 [WORKER] Factura ${facturaId} ${resultado.estado} - CDC: ${resultado.cdc}`);
     }

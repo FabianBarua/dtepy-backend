@@ -109,6 +109,10 @@ module.exports = {
     return init().recibeLote;
   },
   
+  get consultaLote() {
+    return init().consultaLote;
+  },
+  
   get evento() {
     return init().evento;
   },

@@ -6,6 +6,9 @@
 const Empresa = require('../models/Empresa');
 const certificadoService = require('../services/certificadoService');
 const Invoice = require('../models/Invoice');
+const LoteEnvio = require('../models/LoteEnvio');
+const Evento = require('../models/Evento');
+const ApiKey = require('../models/ApiKey');
 
 /**
  * Listar todas las empresas del usuario autenticado
@@ -450,13 +453,31 @@ exports.eliminar = async (req, res) => {
       });
     }
     
-    // Verificar si tiene facturas asociadas
-    const facturasCount = await Invoice.countDocuments({ empresaId: empresa._id });
-    if (facturasCount > 0) {
+    // Verificar dependencias
+    const [facturasCount, lotesCount, eventosCount, apiKeysCount] = await Promise.all([
+      Invoice.countDocuments({ empresaId: empresa._id }),
+      LoteEnvio.countDocuments({ empresaId: empresa._id }),
+      Evento.countDocuments({ empresaId: empresa._id }),
+      ApiKey.countDocuments({ empresaId: empresa._id })
+    ]);
+
+    const dependencias = [];
+    if (facturasCount > 0) dependencias.push(`${facturasCount} factura(s)`);
+    if (lotesCount > 0) dependencias.push(`${lotesCount} lote(s) de envío`);
+    if (eventosCount > 0) dependencias.push(`${eventosCount} evento(s)`);
+    if (apiKeysCount > 0) dependencias.push(`${apiKeysCount} clave(s) de API`);
+
+    if (dependencias.length > 0) {
       return res.status(400).json({
         success: false,
-        error: `No se puede eliminar: la empresa tiene ${facturasCount} factura(s) asociada(s)`,
-        mensaje: 'Elimine o reasigne las facturas antes de eliminar la empresa'
+        error: `No se puede eliminar: la empresa tiene ${dependencias.join(', ')} asociada(s)`,
+        mensaje: 'Elimine o reasigne los registros dependientes antes de eliminar la empresa',
+        dependencias: {
+          facturas: facturasCount,
+          lotes: lotesCount,
+          eventos: eventosCount,
+          apiKeys: apiKeysCount
+        }
       });
     }
     

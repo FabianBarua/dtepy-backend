@@ -30,6 +30,7 @@ const kude = require('facturacionelectronicapy-kude').default;
 
 // Importar wrapper de SET API (soporta Mock y Producción)
 const setApi = require('./setapi-wrapper');
+const envioLoteService = require('./envioLoteService');
 
 /**
  * Procesa una factura electrónica completa
@@ -255,7 +256,39 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     await reportarProgreso(70);
 
     // ========================================
-    // 9. Enviar a SET - AHORA EL XML YA ESTÁ GUARDADO
+    // 9. Decidir modo de envío: normal vs lotes/contingencia
+    // ========================================
+    const tipoEmision = datosCompletos.tipoEmision || 1;
+    const envioFacturas = empresa.configuracionSifen.envioFacturas || 'normal';
+    const usarLote = tipoEmision === 2 || envioFacturas === 'lotes';
+    const tipoDocumentoAux = datosCompletos.tipoDocumento || 1;
+
+    if (usarLote) {
+      await envioLoteService.agregarFacturaALote(invoiceId, cdcFirma, empresa, tipoDocumentoAux);
+      console.log(`📦 Factura añadida a lote - tipoEmision: ${tipoEmision}, tipoDocumento: ${tipoDocumentoAux}`);
+
+      await reportarProgreso(80);
+
+      return {
+        success: true,
+        cdc: cdcFirma,
+        xmlPath: xmlPathRelativo,
+        xmlContent: xmlConQR,
+        rutaArchivo: rutaArchivo,
+        estado: 'encolado',
+        estadoVisual: 'observado',
+        codigoRetorno: null,
+        mensajeRetorno: `Encolado para envío por lote (tipoEmision: ${tipoEmision})`,
+        digestValue: digestValueFirma,
+        fechaProceso: null,
+        correlativo: correlativo,
+        tipoEmision: tipoEmision,
+        tipoDocumento: tipoDocumentoAux
+      };
+    }
+
+    // ========================================
+    // 10. Enviar a SET (modo normal)
     // ========================================
     console.log('📤 Enviando a SET...');
     const idDocumento = crypto.randomBytes(16).toString('hex');
@@ -283,7 +316,7 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     }
 
     // ========================================
-    // 10. Extraer datos de respuesta (o usar valores por error)
+    // 11. Extraer datos de respuesta (o usar valores por error)
     // ========================================
     let codigoRetorno = '0000';
     let mensajeRetorno = null;
@@ -314,7 +347,7 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     await reportarProgreso(80);
 
     // ========================================
-    // 11. Retornar resultado
+    // 12. Retornar resultado
     // ========================================
     // NOTA: El CDC y DigestValue ya fueron guardados en BD después de firmar el XML
     return {

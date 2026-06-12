@@ -213,12 +213,15 @@ router.post('/crear', async (req, res) => {
       const tipoDocumentoCodigo = datosFactura.data?.tipoDocumento || datosFactura.tipoDocumento;
       const deDescripcion = tiposDocumentoMap[tipoDocumentoCodigo] || 'Factura electrónica';
 
+      const tipoEmisionVal = datosFactura.data?.tipoEmision || datosFactura.tipoEmision || 1;
+
       // Actualizar factura existente con nuevos datos
       facturaExistente.datosFactura = datosFactura;
       facturaExistente.estadoSifen = 'encolado';
       facturaExistente.proceso = null;  // Resetear para nuevo intento
       facturaExistente.fechaCreacion = new Date();
       facturaExistente.de = deDescripcion;  // Actualizar campo DE
+      facturaExistente.tipoEmision = tipoEmisionVal;
       // Limpiar campos de proceso anterior
       facturaExistente.cdc = null;
       facturaExistente.xmlPath = null;
@@ -291,32 +294,35 @@ router.post('/crear', async (req, res) => {
      const cliente = datosFactura.data?.cliente || datosFactura.cliente || {};
 
      // Extraer DE (descripción del tipo de documento) basado en el código de tipoDocumento
-     const tipoDocumentoCodigo = datosFactura.data?.tipoDocumento || datosFactura.tipoDocumento;
-     const deDescripcion = tiposDocumentoMap[tipoDocumentoCodigo] || 'Factura electrónica';
+      const tipoDocumentoCodigo = datosFactura.data?.tipoDocumento || datosFactura.tipoDocumento;
+      const deDescripcion = tiposDocumentoMap[tipoDocumentoCodigo] || 'Factura electrónica';
+
+      const tipoEmisionVal = datosFactura.data?.tipoEmision || datosFactura.tipoEmision || 1;
 
      const invoice = new Invoice({
-       empresaId: empresa._id,
-       rucEmpresa: empresa.ruc,
-       correlativo: correlativoCompleto,
-       cliente: {
-         ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
-         nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
-         razonSocial: cliente.razonSocial,
-         nombreFantasia: cliente.nombreFantasia,
-         direccion: cliente.direccion,
-         telefono: cliente.telefono,
-         email: cliente.email,
-         documentoTipo: cliente.documentoTipo,
-         documentoNumero: cliente.documentoNumero
-       },
-       total: totalFactura,
-       fechaCreacion: new Date(),
-       estadoSifen: 'encolado',
-       proceso: null,  // Nuevo campo: null = pendiente de procesar
-       datosFactura: datosFactura,
-       facturaHash: facturaHash,
-       de: deDescripcion  // Nuevo campo: descripción del tipo de documento
-     });
+        empresaId: empresa._id,
+        rucEmpresa: empresa.ruc,
+        correlativo: correlativoCompleto,
+        cliente: {
+          ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
+          nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
+          razonSocial: cliente.razonSocial,
+          nombreFantasia: cliente.nombreFantasia,
+          direccion: cliente.direccion,
+          telefono: cliente.telefono,
+          email: cliente.email,
+          documentoTipo: cliente.documentoTipo,
+          documentoNumero: cliente.documentoNumero
+        },
+        total: totalFactura,
+        fechaCreacion: new Date(),
+        estadoSifen: 'encolado',
+        proceso: null,  // Nuevo campo: null = pendiente de procesar
+        datosFactura: datosFactura,
+        facturaHash: facturaHash,
+        de: deDescripcion,  // Nuevo campo: descripción del tipo de documento
+        tipoEmision: tipoEmisionVal
+      });
 
     await invoice.save();
     console.log(`📦 Factura creada en BD: ${invoice._id} (estado: encolado)`);

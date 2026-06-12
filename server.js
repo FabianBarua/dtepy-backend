@@ -54,6 +54,7 @@ const { verificarToken, verificarAdmin } = require('./middleware/auth');
 const empresaRoutes = require('./routes/empresas');
 const facturarRoutes = require('./routes/facturar');
 const eventosRoutes = require('./routes/eventos');
+const lotesRoutes = require('./routes/lotes');
 
 // Usar rutas
 app.use('/api/stats', statsRoutes);
@@ -61,6 +62,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/empresas', empresaRoutes);
 app.use('/api/facturar', facturarRoutes);
 app.use('/api/eventos', eventosRoutes);
+app.use('/api/lotes', lotesRoutes);
 
 // Rutas de autenticación (públicas)
 app.post('/api/auth/login', authController.login);
@@ -204,11 +206,13 @@ app.get('/api/invoices', async (req, res) => {
         correlativo: f.correlativo,
         cdc: f.cdc,
         estadoSifen: f.estadoSifen,
-        proceso: f.proceso,  // Nuevo campo: null = pendiente, 'Completado' = completado, 'No completado' = error
+        proceso: f.proceso,
         fechaCreacion: f.fechaCreacion,
         fechaEnvio: f.fechaEnvio,
         total: f.total,
-        cliente: f.cliente
+        cliente: f.cliente,
+        tipoEmision: f.tipoEmision || 1,
+        grupoLoteId: f.grupoLoteId || null
       }))
     });
   } catch (error) {
@@ -338,6 +342,8 @@ app.get('/api/factura/estado/:id', async (req, res) => {
         mensajeRetorno: invoice.mensajeRetorno,
         fechaCreacion: invoice.fechaCreacion,
         fechaEnvio: invoice.fechaEnvio,
+        tipoEmision: invoice.tipoEmision || 1,
+        grupoLoteId: invoice.grupoLoteId || null,
         job: {
           status: jobStatus,
           progress: jobProgress,
@@ -511,8 +517,10 @@ app.get('/api/logs', async (req, res) => {
       filtro.invoiceId = invoiceId;
     }
     
+    const skip = (options.page - 1) * options.limit;
     const logs = await OperationLog.find(filtro)
       .sort(options.sort)
+      .skip(skip)
       .limit(options.limit)
       .populate('invoiceId', 'correlativo cdc estadoSifen');
     
@@ -717,8 +725,24 @@ app.get('/api/invoices/estado/:cdc', async (req, res) => {
 });
 
 // Endpoint para limpiar/eliminar todas las facturas de la base de datos
-app.delete('/api/invoices/clear', async (req, res) => {
+app.delete('/api/invoices/clear', verificarToken, async (req, res) => {
   try {
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ success: false, error: 'Contraseña requerida' });
+    }
+
+    const User = require('./models/User');
+    const usuario = await User.findById(req.usuario._id).select('+password');
+    if (!usuario) {
+      return res.status(401).json({ success: false, error: 'Usuario no encontrado' });
+    }
+
+    const passwordValido = await usuario.compararPassword(password);
+    if (!passwordValido) {
+      return res.status(401).json({ success: false, error: 'Contraseña incorrecta' });
+    }
+
     // Eliminar todos los documentos de la colección Invoice
     const result = await Invoice.deleteMany({});
     
@@ -744,18 +768,30 @@ app.delete('/api/invoices/clear', async (req, res) => {
 });
 
 // Endpoint para eliminar una factura específica por ID
-app.delete('/api/invoices/:id', async (req, res) => {
+app.delete('/api/invoices/:id', verificarToken, async (req, res) => {
   try {
     const { id } = req.params;
     
-    const result = await Invoice.findByIdAndDelete(id);
+    const invoice = await Invoice.findById(id).populate('grupoLoteId', 'descripcion');
     
-    if (!result) {
+    if (!invoice) {
       return res.status(404).json({
         success: false,
         error: 'Factura no encontrada'
       });
     }
+    
+    // Verificar si pertenece a un lote
+    if (invoice.grupoLoteId) {
+      return res.status(400).json({
+        success: false,
+        error: `No se puede eliminar: la factura pertenece al lote "${invoice.grupoLoteId.descripcion || invoice.grupoLoteId._id}"`,
+        bloqueadoPorLote: true,
+        loteId: invoice.grupoLoteId._id
+      });
+    }
+    
+    await Invoice.findByIdAndDelete(id);
     
     // Eliminar también los logs asociados
     await OperationLog.deleteMany({ invoiceId: id });

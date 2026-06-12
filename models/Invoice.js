@@ -121,6 +121,19 @@ const invoiceSchema = new mongoose.Schema({
     index: true
   },
   // ========================================
+  // CAMPOS PARA CONTINGENCIA / LOTES
+  // ========================================
+  tipoEmision: {
+    type: Number,
+    enum: [1, 2],
+    default: 1
+  },
+  grupoLoteId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'LoteEnvio',
+    index: true
+  },
+  // ========================================
   // CAMPO DE (DESCRIPCIÓN DEL TIPO DE DOCUMENTO)
   // ========================================
   de: {

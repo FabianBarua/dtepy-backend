@@ -64,6 +64,11 @@ const empresaSchema = new mongoose.Schema({
     urlLogo: {
       type: String,
       default: 'https://lrtv.jaranetwork.com/sites/default/files/styles/poster/public/logos/hit.png?itok=UHWpjKPdd'
+    },
+    envioFacturas: {
+      type: String,
+      enum: ['normal', 'lotes'],
+      default: 'normal'
     }
   },
   

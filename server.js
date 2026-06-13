@@ -344,6 +344,7 @@ app.get('/api/factura/estado/:id', async (req, res) => {
         fechaEnvio: invoice.fechaEnvio,
         tipoEmision: invoice.tipoEmision || 1,
         grupoLoteId: invoice.grupoLoteId || null,
+        proceso: invoice.proceso || null,
         job: {
           status: jobStatus,
           progress: jobProgress,

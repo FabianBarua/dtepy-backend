@@ -157,9 +157,7 @@ exports.crear = async (req, res) => {
 exports.actualizar = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('📝 Actualizando empresa ID:', id);
-    console.log('📦 Body recibido:', JSON.stringify(req.body, null, 2));
-    
+
     const {
       ruc,
       nombreFantasia,
@@ -264,52 +262,19 @@ exports.actualizar = async (req, res) => {
     if (email !== undefined) empresa.email = email;
     if (activo !== undefined) empresa.activo = activo;
 
-    console.log('💾 Datos antes de guardar:', {
-      ruc: empresa.ruc,
-      nombreFantasia: empresa.nombreFantasia,
-      razonSocial: empresa.razonSocial,
-      configuracionSifen: empresa.configuracionSifen
-    });
-
     await empresa.save();
-
-    console.log('✅ Empresa guardada exitosamente:', empresa._id);
-    console.log('📋 Datos guardados:', {
-      _id: empresa._id,
-      ruc: empresa.ruc,
-      nombreFantasia: empresa.nombreFantasia,
-      razonSocial: empresa.razonSocial,
-      configuracionSifen: empresa.configuracionSifen,
-      updatedAt: empresa.updatedAt
-    });
 
     res.json({
       success: true,
       message: 'Empresa actualizada exitosamente',
-      data: empresa,
-      debug: {
-        recibido: req.body,
-        guardado: {
-          ruc: empresa.ruc,
-          nombreFantasia: empresa.nombreFantasia,
-          razonSocial: empresa.razonSocial,
-          configuracionSifen: empresa.configuracionSifen
-        }
-      }
+      data: empresa
     });
   } catch (error) {
-    console.error('❌ Error actualizando empresa:', error);
-    console.error('❌ Detalles del error:', {
-      name: error.name,
-      message: error.message,
-      errors: error.errors,
-      stack: error.stack
-    });
+    console.error('❌ Error actualizando empresa:', error.message);
     res.status(500).json({
       success: false,
       error: 'Error al actualizar empresa',
-      message: error.message,
-      details: error.errors ? Object.keys(error.errors).map(k => error.errors[k].message) : null
+      message: error.message
     });
   }
 };

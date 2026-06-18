@@ -42,21 +42,24 @@ router.post('/enviar', async (req, res) => {
     if (!invoiceId) {
       return res.status(400).json({
         success: false,
-        error: 'ID de factura requerido'
+        error: 'EVENTO_INVOICE_ID_REQUIRED',
+        message: 'ID de factura requerido'
       });
     }
 
     if (!tipoEvento) {
       return res.status(400).json({
         success: false,
-        error: 'Tipo de evento requerido'
+        error: 'EVENTO_TIPO_REQUIRED',
+        message: 'Tipo de evento requerido'
       });
     }
 
     if (!descripcion) {
       return res.status(400).json({
         success: false,
-        error: 'Descripción del evento requerida'
+        error: 'EVENTO_DESCRIPCION_REQUIRED',
+        message: 'Descripción del evento requerida'
       });
     }
 
@@ -73,7 +76,8 @@ router.post('/enviar', async (req, res) => {
     if (!tiposValidos.includes(tipoEvento)) {
       return res.status(400).json({
         success: false,
-        error: 'Tipo de evento no válido',
+        error: 'EVENTO_TIPO_INVALIDO',
+        message: 'Tipo de evento no válido',
         tiposValidos
       });
     }
@@ -84,7 +88,8 @@ router.post('/enviar', async (req, res) => {
     if (!invoice) {
       return res.status(404).json({
         success: false,
-        error: 'Factura no encontrada'
+        error: 'EVENTO_FACTURA_NOT_FOUND',
+        message: 'Factura no encontrada'
       });
     }
 
@@ -93,10 +98,11 @@ router.post('/enviar', async (req, res) => {
       // La cancelación solo puede hacerla el emisor y dentro de las 48hs
       // Por ahora solo validamos que esté aprobada
       if (invoice.estadoSifen !== 'aceptado') {
-        return res.status(400).json({
-          success: false,
-          error: 'Solo se puede cancelar facturas aprobadas por SET'
-        });
+      return res.status(400).json({
+        success: false,
+        error: 'EVENTO_CANCELACION_INVALIDA',
+        message: 'Solo se puede cancelar facturas aprobadas por SET'
+      });
       }
     }
 
@@ -122,8 +128,8 @@ router.post('/enviar', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      error: 'Error al enviar evento',
-      mensaje: error.message
+      error: 'EVENTO_ENVIO_ERROR',
+      message: error.message
     });
   }
 });
@@ -150,8 +156,8 @@ router.get('/factura/:invoiceId', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      error: 'Error al obtener eventos',
-      mensaje: error.message
+      error: 'EVENTOS_OBTENER_ERROR',
+      message: error.message
     });
   }
 });
@@ -178,8 +184,8 @@ router.get('/cdc/:cdc', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      error: 'Error al obtener eventos',
-      mensaje: error.message
+      error: 'EVENTOS_OBTENER_ERROR',
+      message: error.message
     });
   }
 });
@@ -200,7 +206,8 @@ router.get('/:id', async (req, res) => {
     if (!evento) {
       return res.status(404).json({
         success: false,
-        error: 'Evento no encontrado'
+        error: 'EVENTO_NOT_FOUND',
+        message: 'Evento no encontrado'
       });
     }
 
@@ -214,8 +221,8 @@ router.get('/:id', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      error: 'Error al obtener evento',
-      mensaje: error.message
+      error: 'EVENTO_OBTENER_ERROR',
+      message: error.message
     });
   }
 });
@@ -256,8 +263,8 @@ router.get('/', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      error: 'Error al listar eventos',
-      mensaje: error.message
+      error: 'EVENTOS_LISTAR_ERROR',
+      message: error.message
     });
   }
 });

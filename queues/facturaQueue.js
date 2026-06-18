@@ -165,16 +165,15 @@ async function cleanFailedJobs(queue) {
  * Limpiar toda la cola (todos los estados)
  */
 async function cleanAllJobs(queue) {
-  const [waiting, active, completed, failed, delayed, paused] = await Promise.all([
+  const [waiting, active, completed, failed, delayed] = await Promise.all([
     queue.getWaiting(),
     queue.getActive(),
     queue.getCompleted(),
     queue.getFailed(),
-    queue.getDelayed(),
-    queue.getPaused()
+    queue.getDelayed()
   ]);
 
-  const allJobs = [...waiting, ...active, ...completed, ...failed, ...delayed, ...paused];
+  const allJobs = [...waiting, ...active, ...completed, ...failed, ...delayed];
   const removed = await Promise.all(allJobs.map(job => job.remove()));
   return removed.length;
 }
@@ -183,31 +182,27 @@ async function cleanAllJobs(queue) {
  * Obtener jobs recientes de las colas
  */
 async function getRecentJobs(limit = 20) {
-  const [completed, failed, active, waiting] = await Promise.all([
+  const [completed, failed, active, waiting, kudeCompleted, kudeFailed, kudeActive, kudeWaiting] = await Promise.all([
     facturaQueue.getCompleted(0, limit - 1),
     facturaQueue.getFailed(0, limit - 1),
     facturaQueue.getActive(0, limit - 1),
-    facturaQueue.getWaiting(0, limit - 1)
+    facturaQueue.getWaiting(0, limit - 1),
+    kudeQueue.getCompleted(0, limit - 1),
+    kudeQueue.getFailed(0, limit - 1),
+    kudeQueue.getActive(0, limit - 1),
+    kudeQueue.getWaiting(0, limit - 1)
   ]);
 
   // Formatear jobs con información relevante
   const formatJob = (job, queueName = 'facturacion') => {
-    // Los datos pueden estar en diferentes niveles dependiendo de cómo se guardó el job
     const datosFactura = job.data?.datosFactura;
-    
-    // Estructura ERPNext: datosFactura.data.ruc o datosFactura.param.ruc
-    const data = datosFactura?.data || datosFactura;
+    const data = datosFactura?.data || datosFactura || {};
     const param = datosFactura?.param || {};
-    
-    // Extraer RUC del cliente desde data.cliente.ruc
-    const ruc = data?.cliente?.ruc || data.ruc || param.ruc || job.data?.ruc || 'N/A';
-    
-    // Extraer número de factura
-    const numero = data.numero || job.data?.numero || 'N/A';
-    
-    // Obtener timestamp
+
+    const ruc = data?.cliente?.ruc || data.ruc || param.ruc || job.data?.ruc || job.data?.empresaId || 'N/A';
+    const numero = data.numero || job.data?.numero || job.data?.correlativo || 'N/A';
     const timestamp = job.finishedOn || job.processedOn || job.timestamp;
-    
+
     return {
       id: job.id,
       queue: queueName,
@@ -220,18 +215,19 @@ async function getRecentJobs(limit = 20) {
     };
   };
 
-  // Combinar y ordenar por fecha (más reciente primero)
+  // Combinar jobs de ambas colas y ordenar por fecha
   const allJobs = [
     ...completed.map(job => formatJob(job, 'facturacion')),
     ...failed.map(job => formatJob(job, 'facturacion')),
     ...active.map(job => formatJob(job, 'facturacion')),
-    ...waiting.map(job => formatJob(job, 'facturacion'))
+    ...waiting.map(job => formatJob(job, 'facturacion')),
+    ...kudeCompleted.map(job => formatJob(job, 'kude')),
+    ...kudeFailed.map(job => formatJob(job, 'kude')),
+    ...kudeActive.map(job => formatJob(job, 'kude')),
+    ...kudeWaiting.map(job => formatJob(job, 'kude'))
   ];
 
-  // Ordenar por timestamp descendente
   allJobs.sort((a, b) => b.timestamp - a.timestamp);
-
-  // Retornar los más recientes
   return allJobs.slice(0, limit);
 }
 

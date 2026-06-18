@@ -35,7 +35,8 @@ router.get('/list', async (req, res) => {
     });
   } catch (error) {
     console.error('Error listando lotes:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false,       error: 'LOTES_ERROR',
+      message: error.message });
   }
 });
 
@@ -46,13 +47,14 @@ router.get('/:id', async (req, res) => {
       .populate('facturas.facturaId', 'correlativo cdc estadoSifen xmlPath');
 
     if (!lote) {
-      return res.status(404).json({ success: false, error: 'Lote no encontrado' });
+      return res.status(404).json({ success: false, error: 'LOTE_NOT_FOUND', message: 'Lote no encontrado' });
     }
 
     res.json({ success: true, data: lote });
   } catch (error) {
     console.error('Error obteniendo lote:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false,       error: 'LOTES_ERROR',
+      message: error.message });
   }
 });
 
@@ -62,7 +64,8 @@ router.post('/enviar/:id', async (req, res) => {
     res.json({ success: true, data: lote, message: 'Lote enviado a SIFEN' });
   } catch (error) {
     console.error('Error enviando lote:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false,       error: 'LOTES_ERROR',
+      message: error.message });
   }
 });
 
@@ -72,7 +75,8 @@ router.post('/enviar-pendientes', async (req, res) => {
     res.json({ success: true, data: resultados });
   } catch (error) {
     console.error('Error enviando pendientes:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false,       error: 'LOTES_ERROR',
+      message: error.message });
   }
 });
 
@@ -82,7 +86,8 @@ router.post('/consultar/:id', async (req, res) => {
     res.json({ success: true, data: resultado });
   } catch (error) {
     console.error('Error consultando lote:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false,       error: 'LOTES_ERROR',
+      message: error.message });
   }
 });
 
@@ -92,13 +97,14 @@ router.delete('/:id', async (req, res) => {
 
     const lote = await LoteEnvio.findById(id);
     if (!lote) {
-      return res.status(404).json({ success: false, error: 'Lote no encontrado' });
+      return res.status(404).json({ success: false, error: 'LOTE_NOT_FOUND', message: 'Lote no encontrado' });
     }
 
     if (!['en_espera', 'error'].includes(lote.estado)) {
       return res.status(400).json({
         success: false,
-        error: 'Solo se pueden eliminar lotes en estado "en_espera" o "error"'
+        error: 'LOTE_INVALID_STATE',
+        message: 'Solo se pueden eliminar lotes en estado "en_espera" o "error"'
       });
     }
 
@@ -120,7 +126,8 @@ router.delete('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Error eliminando lote:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false,       error: 'LOTES_ERROR',
+      message: error.message });
   }
 });
 

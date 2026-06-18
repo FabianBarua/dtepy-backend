@@ -236,53 +236,35 @@ facturaQueue.process('generar-factura', async (job) => {
 // ========================================
 
 kudeQueue.process('generar-kude', async (job) => {
-  const { facturaId, xmlPath, cdc, correlativo, fechaCreacion, datosFactura, empresaId } = job.data;
+  const { facturaId, cdc, correlativo, fechaCreacion, datosFactura, empresaId } = job.data;
 
   console.log(`📄 [KUDE] Generando PDF para factura ${facturaId}`);
   console.log(`🔑 empresaId recibido: ${empresaId}`);
 
   try {
-    // Obtener empresa para el logo
+    // Obtener factura y empresa
+    const invoice = await Invoice.findById(facturaId);
+    if (!invoice || !invoice.xmlContent) {
+      throw new Error(`Factura ${facturaId} no encontrada o sin contenido XML en DB`);
+    }
+
     const Empresa = require('../models/Empresa');
     const empresa = await Empresa.findById(empresaId);
 
     console.log(`🏢 Empresa encontrada: ${empresa ? empresa.nombreFantasia : 'NULL'}`);
     console.log(`🖼️ URL Logo: ${empresa?.configuracionSifen?.urlLogo || 'USANDO DEFAULT'}`);
 
-    const pdfPath = await generarKUDE(xmlPath, cdc, correlativo, new Date(fechaCreacion), datosFactura, empresa);
+    const pdfPath = await generarKUDE(invoice.xmlContent, cdc, correlativo, new Date(fechaCreacion), datosFactura, empresa);
 
-    // Actualizar factura con resultado de generación de PDF
-    const invoice = await Invoice.findById(facturaId);
-    if (invoice) {
-      if (pdfPath && fs.existsSync(pdfPath)) {
-        // PDF generado exitosamente
-        invoice.kudePath = pdfPath;
-
-        // Verificar que tanto XML como PDF existan para marcar como Terminado
-        // xmlPath puede ser relativa o absoluta, convertir a absoluta si es relativa
-        let xmlPathAbsoluta = invoice.xmlPath;
-        if (invoice.xmlPath && !path.isAbsolute(invoice.xmlPath)) {
-          xmlPathAbsoluta = path.join(__dirname, '../de_output', invoice.xmlPath);
-        }
-        const xmlExiste = xmlPathAbsoluta && fs.existsSync(xmlPathAbsoluta);
-
-        if (xmlExiste) {
-          // Ambos archivos existen → Proceso completado exitosamente
-          invoice.proceso = 'Completado';
-          console.log(`✅ [KUDE] PDF guardado: ${pdfPath} | XML: ${xmlPathAbsoluta} | Proceso: COMPLETADO`);
-        } else {
-          // PDF existe pero XML no → Incompletado
-          invoice.proceso = 'No completado';
-          console.error(`❌ [KUDE] PDF guardado pero XML no existe en ${xmlPathAbsoluta} | Proceso: INCOMPLETADO`);
-        }
-
-        await invoice.save();
-      } else {
-        // PDF no se pudo generar → Marcar como Incompletado
-        invoice.proceso = 'No completado';
-        await invoice.save();
-        console.error(`❌ [KUDE] No se pudo generar el PDF | Proceso: INCOMPLETADO`);
-      }
+    if (pdfPath && fs.existsSync(pdfPath)) {
+      invoice.kudePath = pdfPath;
+      invoice.proceso = 'Completado';
+      console.log(`✅ [KUDE] PDF guardado: ${pdfPath} | Proceso: COMPLETADO`);
+      await invoice.save();
+    } else {
+      invoice.proceso = 'No completado';
+      await invoice.save();
+      console.error(`❌ [KUDE] No se pudo generar el PDF | Proceso: INCOMPLETADO`);
     }
 
     return { success: true, pdfPath };
@@ -290,12 +272,13 @@ kudeQueue.process('generar-kude', async (job) => {
   } catch (error) {
     console.error(`❌ [KUDE] Error generando PDF: ${error.message}`);
 
-    // Marcar factura como Incompletado si hay error
-    const invoice = await Invoice.findById(facturaId);
-    if (invoice) {
-      invoice.proceso = 'No completado';
-      await invoice.save();
-    }
+    try {
+      const inv = await Invoice.findById(facturaId);
+      if (inv) {
+        inv.proceso = 'No completado';
+        await inv.save();
+      }
+    } catch (_) {}
     
     throw error;
   }

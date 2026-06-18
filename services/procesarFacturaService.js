@@ -375,7 +375,7 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
  * Generar KUDE (PDF) desde XML
  * El JAR genera el PDF con el nombre: {tipoDocumento}_{timbrado}-{establecimiento}-{punto}-{numero}[-{serie}].pdf
  */
-async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactura = null, empresa = null) {
+async function generarKUDE(xmlContenido, cdc, correlativo, fechaCreacion, datosFactura = null, empresa = null) {
   try {
     console.log('📄 Generando KUDE...');
 
@@ -399,37 +399,25 @@ async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactur
     const jsonPDF = JSON.stringify(jsonParam);
 
     // ========================================
-    // CONVERTIR RUTA RELATIVA A ABSOLUTA SI ES NECESARIO
-    // ========================================
-    if (xmlPath && !path.isAbsolute(xmlPath)) {
-      xmlPath = path.join(__dirname, '../de_output', xmlPath);
-    }
-    console.log('📁 Ruta XML:', xmlPath);
-
-    // ========================================
     // CREAR ARCHIVO TEMPORAL SIN ESPACIOS PARA EL JAR
     // ========================================
-    // Crear nombre temporal UNICO: timestamp + random para evitar colisiones concurrentes
     const nombreTemporal = `xml_temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.xml`;
-    const dirTemporal = path.dirname(xmlPath);
+    const dirTemporal = path.join(__dirname, '../de_output');
     const rutaTemporal = path.join(dirTemporal, nombreTemporal);
     let archivoTemporal = null;
 
-    // Copiar el archivo a un nombre temporal sin espacios
+    // Escribir XML a archivo temporal
     try {
-      fs.copyFileSync(xmlPath, rutaTemporal);
+      fs.writeFileSync(rutaTemporal, xmlContenido, 'utf-8');
       archivoTemporal = rutaTemporal;
     } catch (err) {
-      console.error('❌ No se pudo copiar el archivo temporal:', err.message);
+      console.error('❌ No se pudo escribir el archivo temporal:', err.message);
       throw err;
     }
 
     try {
-      // El JAR genera el PDF con su propio nombre basado en el XML
-      const rutaParaJAR = archivoTemporal;
-      await kude.generateKUDE(java8Path, rutaParaJAR, srcJasper, destFolder, JSON.stringify(jsonPDF));
+      await kude.generateKUDE(java8Path, archivoTemporal, srcJasper, destFolder, JSON.stringify(jsonPDF));
     } finally {
-      // Limpiar archivo temporal SIEMPRE (éxito o error)
       if (archivoTemporal && fs.existsSync(archivoTemporal)) {
         try {
           fs.unlinkSync(archivoTemporal);
@@ -443,16 +431,11 @@ async function generarKUDE(xmlPath, cdc, correlativo, fechaCreacion, datosFactur
     // ========================================
     // BUSCAR EL PDF GENERADO POR EL JAR
     // ========================================
-    // El JAR genera: {TipoDocumento}_{timbrado}-{establecimiento}-{punto}-{numero}[-{serie}].pdf
-    // Ejemplo: Factura_electronica_12345678-001-001-0000001.pdf
-
-    // Extraer timbrado y tipo de documento del XML
     let timbrado;
     let tipoDocumentoDescripcion;
     try {
       const xml2js = require('xml2js');
-      const xmlContent = fs.readFileSync(xmlPath, 'utf-8');
-      const xmlObj = await xml2js.parseStringPromise(xmlContent);
+      const xmlObj = await xml2js.parseStringPromise(xmlContenido);
 
       if (xmlObj?.rDE?.DE?.[0]?.gTimb?.[0]?.dNumTim?.[0]) {
         timbrado = xmlObj.rDE.DE[0].gTimb[0].dNumTim[0];

@@ -47,13 +47,17 @@ cd dtepy-backend
 # Instalar dependencias
 npm install
 
-# Aplicar parches a librerías
-node patch-kude.js
-
 # Configurar variables de entorno
 cp .env.example .env
 # Editar .env con tus credenciales
+
+# Verificar el entorno de generación de PDF (KUDE)
+npm run kude:doctor
 ```
+
+> Ya no hace falta parchear `node_modules`. Los artefactos propios de KUDE
+> (`CreateKude.jar` y las plantillas `.jasper`) viven en `assets/kude/` y se le
+> pasan al JAR por parámetro. Ver [Generación de KUDE (PDF)](#generación-de-kude-pdf).
 
 ### Ejecución
 
@@ -519,7 +523,10 @@ await setApi.recibe(id, xml, 'test', certPath, password);
 dtepy-backend/
 ├── server.js                 # Servidor principal
 ├── package.json
-├── patch-kude.js            # Parche para librería KUDE
+├── assets/
+│   └── kude/
+│       ├── CreateKude.jar   # JAR propio (normaliza nombres de archivo)
+│       └── jasper/          # Plantillas .jasper personalizadas
 ├── models/
 │   ├── Invoice.js           # Modelo de factura
 │   ├── Empresa.js           # Modelo de empresa (multi-tenant)
@@ -583,3 +590,64 @@ MIT
 ## 👥 Autores
 
 Jara Network
+
+
+## Generación de KUDE (PDF)
+
+El PDF lo genera un programa Java (`CreateKude`) sobre plantillas de
+JasperReports. El proyecto usa una versión propia del JAR (normaliza los
+nombres de archivo: sin acentos ni espacios) y plantillas `.jasper`
+personalizadas (CDC completo en el PDF).
+
+### Cómo funciona
+
+Los artefactos propios están versionados en el repo:
+
+```
+assets/kude/
+├── CreateKude.jar          # JAR propio
+└── jasper/
+    ├── Factura.jasper
+    ├── Factura-Ticket.jasper
+    ├── NotaCredito.jasper
+    └── NotaDebito.jasper
+```
+
+`services/kudeRunner.js` los combina con lo que trae la librería
+`facturacionelectronicapy-kude` y arma la llamada a Java:
+
+1. **Plantillas**: copia las plantillas base de la librería a `.kude/DE/` y
+   encima pone las de `assets/kude/jasper/`. Idempotente, se puede repetir.
+   Así las plantillas que no personalizamos siguen actualizándose con la librería.
+2. **Classpath**: usa `-cp <JAR propio>:<librería>/jasperLibs/*` con la clase
+   `CreateKude`. No usa `-jar` porque el `Class-Path` del manifiesto del JAR es
+   relativo a su ubicación (esperaba estar dentro de `node_modules`).
+3. **Ejecución**: `execFile` sin shell, así las rutas pueden tener espacios y el
+   JSON de parámetros llega sin escapado.
+
+**`node_modules` no se modifica nunca.** `npm ci`, un rebuild de Docker o un
+deploy limpio no rompen nada, y no hay ningún paso manual después de instalar.
+
+### Comandos
+
+```bash
+# Verificar todo el entorno: librería, JAR, plantillas, Java,
+# y generar un PDF de prueba real
+npm run kude:doctor
+
+# Solo preparar el directorio de plantillas (opcional, para el build de Docker)
+npm run kude:prepare
+```
+
+### Requisitos
+
+- **Java 21 o superior** (el `CreateKude.jar` propio está compilado para esa
+  versión). Se resuelve con `KUDE_JAVA_PATH`, `JAVA8_HOME`, `JAVA_HOME` o el
+  `java` del `PATH`; si la variable apunta a un directorio, se usa `bin/java`.
+
+### Personalizar una plantilla
+
+1. Editá o agregá el `.jasper` en `assets/kude/jasper/`.
+2. `npm run kude:doctor` para validar.
+
+No hay que copiar nada a `node_modules`.

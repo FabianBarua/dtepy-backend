@@ -26,7 +26,7 @@ const {
 const FacturaElectronicaPY = require('facturacionelectronicapy-xmlgen').default;
 const xmlsign = require('facturacionelectronicapy-xmlsign').default;
 const qr = require('facturacionelectronicapy-qrgen').default;
-const kude = require('facturacionelectronicapy-kude').default;
+const { generarKudePdf } = require('./kudeRunner');
 
 // Importar wrapper de SET API (soporta Mock y Producción)
 const setApi = require('./setapi-wrapper');
@@ -381,8 +381,6 @@ async function generarKUDE(xmlContenido, cdc, correlativo, fechaCreacion, datosF
 
     const fs = require('fs');
     const path = require('path');
-    const java8Path = process.env.JAVA8_HOME || process.env.JAVA_HOME || 'java';
-    const srcJasper =  path.join(__dirname, `../node_modules/facturacionelectronicapy-kude/dist/DE/`);
 
     const destFolder = path.join(__dirname, `../de_output`,
                                   empresa.ruc,
@@ -396,10 +394,9 @@ async function generarKUDE(xmlContenido, cdc, correlativo, fechaCreacion, datosF
       active: true,
       template: datosFactura?.data?.templateFactura || datosFactura?.templateFactura || "normal"
     };
-    const jsonPDF = JSON.stringify(jsonParam);
 
     // ========================================
-    // CREAR ARCHIVO TEMPORAL SIN ESPACIOS PARA EL JAR
+    // CREAR ARCHIVO TEMPORAL PARA EL JAR
     // ========================================
     const nombreTemporal = `xml_temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.xml`;
     const dirTemporal = path.join(__dirname, '../de_output');
@@ -416,7 +413,11 @@ async function generarKUDE(xmlContenido, cdc, correlativo, fechaCreacion, datosF
     }
 
     try {
-      await kude.generateKUDE(java8Path, archivoTemporal, srcJasper, destFolder, JSON.stringify(jsonPDF));
+      await generarKudePdf({
+        xmlPath: archivoTemporal,
+        destFolder,
+        params: jsonParam
+      });
     } finally {
       if (archivoTemporal && fs.existsSync(archivoTemporal)) {
         try {

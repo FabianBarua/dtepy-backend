@@ -7,9 +7,31 @@ require('dotenv').config();
 
 const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
 
 // Configurar Express
 const app = express();
+
+// ========================================
+// CORS
+// ========================================
+// Va ANTES de las rutas: si se registra después, Express ya respondió y las
+// cabeceras nunca se envían (por eso el frontend solo funcionaba con proxy).
+//
+// CORS_ORIGINS: lista separada por comas con los orígenes del frontend.
+// Ej: CORS_ORIGINS=https://app.midominio.com,http://localhost:3000
+// Con '*' (por defecto) se acepta cualquier origen.
+const origenesPermitidos = (process.env.CORS_ORIGINS || '*')
+  .split(',')
+  .map((origen) => origen.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: origenesPermitidos.includes('*') ? '*' : origenesPermitidos,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Disposition']
+}));
 
 // Middleware para parsear JSON
 app.use(express.json());
@@ -62,10 +84,27 @@ app.put('/api/api-keys/:id/renew', verificarToken, apiKeyController.renovarApiKe
 app.delete('/api/api-keys/:id', verificarToken, apiKeyController.revocarApiKey);
 
 
+// ========================================
+// HEALTH CHECK (publico, sin auth)
+// ========================================
+// Lo usa el frontend para validar la URL del backend antes de iniciar sesion.
+app.get('/api/health', (req, res) => {
+  const estadosMongo = ['desconectado', 'conectado', 'conectando', 'desconectando'];
+  res.json({
+    ok: true,
+    servicio: 'dtepy-backend',
+    version: require('./package.json').version,
+    mongo: estadosMongo[mongoose.connection.readyState] || 'desconocido',
+    fecha: new Date().toISOString()
+  });
+});
+
 // Conectar a MongoDB
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/sifen_db';
+
 const connectDB = async () => {
   try {
-    await mongoose.connect('mongodb://127.0.0.1:27017/sifen_db', {
+    await mongoose.connect(MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
@@ -75,25 +114,6 @@ const connectDB = async () => {
     process.exit(1);
   }
 };
-
-// ========================================
-// MIDDLEWARE DE CORS
-// ========================================
-
-// Middleware para manejar CORS
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
-
-  next();
-});
 
 // ========================================
 // INICIO DEL SERVIDOR
@@ -107,7 +127,9 @@ const iniciarServidor = async () => {
 
   app.listen(PORT, () => {
     console.log(`🚀 Servidor de facturación electrónica iniciado en http://localhost:${PORT}`);
+    console.log(`   CORS permitido para: ${origenesPermitidos.join(', ')}`);
     console.log(`📋 Endpoints disponibles:`);
+    console.log(`   GET  /api/health - Estado del servicio (público)`);
     console.log(`   POST /api/facturar/crear - Genera factura electrónica (con cola asíncrona)`);
     console.log(`   GET  /api/stats - Estadísticas del sistema`);
     console.log(`   GET  /api/invoices - Lista de facturas`);

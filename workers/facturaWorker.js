@@ -9,7 +9,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { facturaQueue, kudeQueue } = require('../queues/facturaQueue');
+const { facturaQueue, kudeQueue, describirRedis } = require('../queues/facturaQueue');
 const { procesarFactura, generarKUDE } = require('../services/procesarFacturaService');
 const Invoice = require('../models/Invoice');
 const OperationLog = require('../models/OperationLog');
@@ -335,7 +335,7 @@ process.on('SIGTERM', async () => {
 console.log('\n👷 ========================================');
 console.log('👷   WORKER DE FACTURACIÓN INICIADO');
 console.log('👷 ========================================');
-console.log(`📍 Redis: ${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`);
+console.log(`📍 Redis: ${describirRedis()}`);
 console.log(`📍 MongoDB: ${MONGODB_URI}`);
 console.log('📋 Escuchando jobs de facturación...');
 console.log('=========================================\n');

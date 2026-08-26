@@ -2,20 +2,19 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 
 const apiKeySchema = new mongoose.Schema({
+  // Texto plano de la key: SOLO transitorio (creación/renovación).
+  // El hook pre-save deriva keyHash + keyParcial y lo descarta:
+  // la key en claro nunca se persiste en la base de datos.
   key: {
-    type: String,
-    unique: true,
-    index: true,
-    default: function() {
-      return crypto.randomBytes(32).toString('hex');
-    }
+    type: String
   },
   keyHash: {
     type: String,
-    default: function() {
-      // Este valor se actualizará en el hook pre-save
-      return '';
-    }
+    index: true
+  },
+  // Prefijo/sufijo para identificar la key en listados (ej: "a1b2c3d4...e5f6a7b8")
+  keyParcial: {
+    type: String
   },
   nombre: {
     type: String,
@@ -79,15 +78,21 @@ apiKeySchema.statics.encontrarPorKey = async function(key) {
   return await this.findOne({ keyHash: hash, activa: true });
 };
 
-// Hook pre-save para generar el hash
+// Hook pre-save: deriva hash + parcial y descarta el texto plano
 apiKeySchema.pre('save', function(next) {
-  // Generar key si no existe (por si el default no se ejecutó)
-  if (!this.key || this.key === '') {
+  // Documento nuevo sin key explícita: generarla
+  if (this.isNew && !this.key) {
     this.key = crypto.randomBytes(32).toString('hex');
   }
 
-  // Generar hash de la key
-  this.keyHash = crypto.createHash('sha256').update(this.key).digest('hex');
+  // Hay una key en texto plano (creación, renovación, o documento viejo
+  // todavía sin migrar): derivar lo necesario y no guardarla nunca.
+  if (this.key) {
+    this.keyHash = crypto.createHash('sha256').update(this.key).digest('hex');
+    this.keyParcial = `${this.key.substring(0, 8)}...${this.key.substring(this.key.length - 8)}`;
+    this._plainKey = this.key; // solo en memoria: para mostrarla una única vez
+    this.key = undefined;      // nunca se persiste
+  }
 
   next();
 });

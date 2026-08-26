@@ -41,9 +41,17 @@
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^7.5.0",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "overrides": {
+    "xml2js": "^0.6.2",
+    "node-forge": "^1.4.0",
+    "axios": "^1.17.1",
+    "xmldom": "npm:@xmldom/xmldom@^0.8.11",
+    "uuid": "^11.1.1"
   }
 }

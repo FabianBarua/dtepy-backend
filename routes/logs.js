@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const OperationLog = require('../models/OperationLog');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, requerirSesionAdmin } = require('../middleware/auth');
 
 router.use(verificarToken);
 
@@ -63,7 +63,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.delete('/clear', async (req, res) => {
+router.delete('/clear', requerirSesionAdmin, async (req, res) => {
   try {
     const { tipo } = req.query;
 

@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const Invoice = require('../models/Invoice');
+const { verificarToken } = require('../middleware/auth');
+
+// Igual que el resto de las rutas: sin token o API Key no se exponen datos
+// de facturación (era la única ruta sin autenticación).
+router.use(verificarToken);
 
 router.get('/', async (req, res) => {
   try {

@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Invoice = require('../models/Invoice');
 const OperationLog = require('../models/OperationLog');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, requerirSesionAdmin } = require('../middleware/auth');
 const {
   extraerCodigoRetorno,
   extraerMensajeRetorno,
@@ -325,7 +325,7 @@ router.get('/logs', async (req, res) => {
 });
 
 // Limpiar todas las facturas (requiere contraseña)
-router.delete('/clear', async (req, res) => {
+router.delete('/clear', requerirSesionAdmin, async (req, res) => {
   try {
     const { password } = req.body;
     if (!password) {

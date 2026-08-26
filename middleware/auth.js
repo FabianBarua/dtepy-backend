@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const ApiKey = require('../models/ApiKey');
+const JWT_SECRET = require('../config/jwtSecret');
 
 // Middleware para verificar el token JWT O API Key
 const verificarToken = async (req, res, next) => {
@@ -19,7 +20,7 @@ const verificarToken = async (req, res, next) => {
 
     // Intentar verificar como JWT primero
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'sifen-secret-key-change-in-production');
+      const decoded = jwt.verify(token, JWT_SECRET);
       
       // Buscar usuario en la base de datos
       const usuario = await User.findById(decoded.userId).select('-password');
@@ -142,8 +143,29 @@ const verificarPermiso = (permisoRequerido) => {
   };
 };
 
+// Middleware para operaciones destructivas (borrado masivo de datos):
+// exige una sesión de usuario admin (JWT). Una API Key nunca alcanza,
+// aunque su dueño sea admin: una key filtrada no debe poder borrar datos
+// ni el rastro de auditoría.
+const requerirSesionAdmin = (req, res, next) => {
+  if (req.tipoAutenticacion !== 'jwt') {
+    return res.status(403).json({
+      success: false,
+      error: 'Esta operación requiere una sesión de usuario (no está permitida con API Key)'
+    });
+  }
+  if (req.usuario.rol !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      error: 'Acceso denegado. Se requiere rol de administrador'
+    });
+  }
+  next();
+};
+
 module.exports = {
   verificarToken,
   verificarAdmin,
-  verificarPermiso
+  verificarPermiso,
+  requerirSesionAdmin
 };

@@ -50,6 +50,12 @@ npm install
 # Configurar variables de entorno
 cp .env.example .env
 # Editar .env con tus credenciales
+# OBLIGATORIO: definir un JWT_SECRET propio (el servidor no arranca sin uno):
+node -e "console.log('JWT_SECRET=' + require('crypto').randomBytes(48).toString('hex'))" >> .env
+
+# Instalaciones existentes: eliminar las API Keys en texto plano de la BD
+# (las keys siguen funcionando; solo se borra la copia en claro)
+node migrations/002-apikeys-sin-clave-plana.js
 
 # Verificar el entorno de generación de PDF (KUDE)
 npm run kude:doctor

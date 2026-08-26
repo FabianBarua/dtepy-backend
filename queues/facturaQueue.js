@@ -9,72 +9,62 @@ const path = require('path');
 // ========================================
 // CONFIGURACIÓN DE REDIS
 // ========================================
-// Se acepta una URL completa (REDIS_URL) o las variables sueltas.
-// La URL es lo que entregan los servicios gestionados (Dokploy, Railway,
-// Upstash, etc.) e incluye la contraseña, que las variables sueltas
-// originales no contemplaban.
+// Acepta una URL completa (lo que entregan Dokploy, Railway, Upstash...)
+// o variables sueltas. La contraseña es opcional en ambos casos.
 //
 //   REDIS_URL=redis://default:contrasena@host:6379
-//   REDIS_URL=rediss://default:contrasena@host:6379   (TLS)
-//
-// Alternativa sin URL:
-//   REDIS_HOST=host  REDIS_PORT=6379  REDIS_PASSWORD=contrasena
+//   REDIS_URL=rediss://default:contrasena@host:6379/2   (TLS + base 2)
+//   REDIS_HOST=host  REDIS_PORT=6379  [REDIS_PASSWORD=...]
 
-const opcionesBase = {
+const OPCIONES_BASE = {
   maxRetriesPerRequest: null,  // Importante para Bull
-  retryStrategy: (times) => {
-    if (times > 3) return null;  // Dejar de reintentar después de 3 intentos
-    return Math.min(times * 200, 2000);  // Delay exponencial
-  }
+  retryStrategy: (intentos) => (intentos > 3 ? null : Math.min(intentos * 200, 2000))
 };
 
-function construirRedisConfig() {
-  const url = process.env.REDIS_URL || process.env.REDIS_URI;
+// Las claves sin valor se descartan para que ioredis aplique sus defaults.
+const sinVacios = (obj) =>
+  Object.fromEntries(Object.entries(obj).filter(([, valor]) => valor !== undefined && valor !== ''));
 
-  if (!url) {
-    return {
-      ...opcionesBase,
-      host: process.env.REDIS_HOST || 'localhost',
-      port: Number(process.env.REDIS_PORT) || 6379,
-      ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
-      ...(process.env.REDIS_USERNAME ? { username: process.env.REDIS_USERNAME } : {}),
-      ...(process.env.REDIS_DB ? { db: Number(process.env.REDIS_DB) } : {})
-    };
-  }
-
+function desdeUrl(url) {
   let parsed;
   try {
     parsed = new URL(url);
   } catch (error) {
-    throw new Error(`REDIS_URL no es una URL válida: ${error.message}`);
+    throw new Error(`REDIS_URL no es una URL válida: ${url}`);
   }
 
-  const usuario = decodeURIComponent(parsed.username || '');
-  const contrasena = decodeURIComponent(parsed.password || '');
-  const baseDatos = parsed.pathname && parsed.pathname.length > 1
-    ? Number(parsed.pathname.slice(1))
-    : 0;
+  const usuario = decodeURIComponent(parsed.username);
 
   return {
-    ...opcionesBase,
     host: parsed.hostname,
     port: Number(parsed.port) || 6379,
-    ...(contrasena ? { password: contrasena } : {}),
+    password: decodeURIComponent(parsed.password) || undefined,
     // 'default' es el usuario implícito: omitirlo hace que ioredis mande
-    // `AUTH <password>`, compatible también con Redis < 6.
-    ...(usuario && usuario !== 'default' ? { username: usuario } : {}),
-    ...(baseDatos ? { db: baseDatos } : {}),
-    ...(parsed.protocol === 'rediss:' ? { tls: {} } : {})
+    // `AUTH <password>` a secas, compatible también con Redis < 6.
+    username: usuario && usuario !== 'default' ? usuario : undefined,
+    db: Number(parsed.pathname.slice(1)) || undefined,
+    tls: parsed.protocol === 'rediss:' ? {} : undefined
   };
 }
 
-const redisConfig = construirRedisConfig();
+function desdeVariables() {
+  return {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: Number(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD,
+    username: process.env.REDIS_USERNAME,
+    db: Number(process.env.REDIS_DB) || undefined
+  };
+}
 
-// Descripción sin credenciales, para logs
+const url = process.env.REDIS_URL || process.env.REDIS_URI;
+const redisConfig = { ...OPCIONES_BASE, ...sinVacios(url ? desdeUrl(url) : desdeVariables()) };
+
+/** Descripción para logs, sin credenciales. */
 function describirRedis() {
   const { host, port, db, password, tls } = redisConfig;
-  return `${tls ? 'rediss' : 'redis'}://${host}:${port}${db ? `/${db}` : ''}` +
-    `${password ? ' (con autenticación)' : ''}`;
+  const esquema = tls ? 'rediss' : 'redis';
+  return `${esquema}://${host}:${port}${db ? `/${db}` : ''}${password ? ' (con auth)' : ''}`;
 }
 
 // Cola principal de facturación

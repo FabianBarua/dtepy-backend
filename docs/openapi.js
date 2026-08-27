@@ -3,27 +3,28 @@
  *
  * Se sirve en /api/docs (Swagger UI) y en /api/openapi.json (JSON crudo).
  *
- * Escrita a mano contra las rutas reales: al agregar o cambiar un endpoint,
- * actualizar también este archivo.
+ * Escrita a mano contra las rutas reales, con los responses tipados según lo
+ * que cada handler devuelve de verdad (no genéricos). Al agregar o cambiar un
+ * endpoint, actualizar también este archivo.
  */
 
 const { version } = require('../package.json');
 
 // ---------------------------------------------------------------------------
-// Respuestas y parámetros reutilizables
+// Helpers de construcción
 // ---------------------------------------------------------------------------
+
+const ref = (nombre) => ({ $ref: `#/components/schemas/${nombre}` });
 
 const respuestaError = (descripcion) => ({
   description: descripcion,
   content: {
-    'application/json': {
-      schema: { $ref: '#/components/schemas/Error' }
-    }
+    'application/json': { schema: ref('Error') }
   }
 });
 
 const NO_AUTORIZADO = respuestaError('Token o API Key ausentes, inválidos o expirados');
-const NO_ENCONTRADO = respuestaError('El recurso no existe');
+const NO_ENCONTRADO = respuestaError('El recurso no existe o está fuera del alcance del token');
 const ERROR_SERVIDOR = respuestaError('Error interno');
 
 const paramRuta = (nombre, descripcion) => ({
@@ -53,9 +54,32 @@ const okJson = (descripcion, schema) => ({
   description: descripcion,
   content: {
     'application/json': {
-      schema: schema || { $ref: '#/components/schemas/RespuestaOk' }
+      schema: schema || ref('RespuestaOk')
     }
   }
+});
+
+/** Envoltorio estándar { success, message?, data } con `data` tipado. */
+const envuelto = (dataSchema, conMensaje = true) => ({
+  type: 'object',
+  properties: {
+    success: { type: 'boolean', example: true },
+    ...(conMensaje ? { message: { type: 'string' } } : {}),
+    data: dataSchema
+  }
+});
+
+const fechaHora = (descripcion) => ({
+  type: 'string',
+  format: 'date-time',
+  nullable: true,
+  ...(descripcion ? { description: descripcion } : {})
+});
+
+const objectId = (descripcion) => ({
+  type: 'string',
+  example: '68ae1f2b9c3d4e5f6a7b8c9d',
+  ...(descripcion ? { description: descripcion } : {})
 });
 
 // ---------------------------------------------------------------------------
@@ -165,20 +189,7 @@ workers asíncronos sobre Redis, no en el request.
         description: 'Público, sin autenticación. Lo usa el frontend para validar la URL del backend antes de iniciar sesión.',
         security: [],
         responses: {
-          200: okJson('El servicio responde', {
-            type: 'object',
-            properties: {
-              ok: { type: 'boolean', example: true },
-              servicio: { type: 'string', example: 'dtepy-backend' },
-              version: { type: 'string', example: '1.0.0' },
-              mongo: {
-                type: 'string',
-                enum: ['desconectado', 'conectado', 'conectando', 'desconectando'],
-                description: 'Estado de la conexión a MongoDB'
-              },
-              fecha: { type: 'string', format: 'date-time' }
-            }
-          })
+          200: okJson('El servicio responde', ref('SaludServicio'))
         }
       }
     },
@@ -202,7 +213,7 @@ workers asíncronos sobre Redis, no en el request.
       post: {
         tags: ['Autenticación'],
         summary: 'Iniciar sesión',
-        description: 'Público. Devuelve el JWT que se usa como `Bearer` en el resto de la API.',
+        description: 'Público. Devuelve el JWT que se usa como `Bearer` en el resto de la API. Máximo 10 intentos fallidos por IP cada 15 minutos.',
         security: [],
         requestBody: {
           required: true,
@@ -220,20 +231,10 @@ workers asíncronos sobre Redis, no en el request.
           }
         },
         responses: {
-          200: okJson('Sesión iniciada', {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              data: {
-                type: 'object',
-                properties: {
-                  token: { type: 'string', description: 'JWT' },
-                  usuario: { $ref: '#/components/schemas/Usuario' }
-                }
-              }
-            }
-          }),
-          401: respuestaError('Credenciales inválidas o usuario inactivo')
+          200: okJson('Sesión iniciada', ref('LoginRespuesta')),
+          400: respuestaError('Faltan username o password'),
+          401: respuestaError('Credenciales inválidas o usuario inactivo'),
+          429: respuestaError('Demasiados intentos de inicio de sesión')
         }
       }
     },
@@ -242,11 +243,20 @@ workers asíncronos sobre Redis, no en el request.
       get: {
         tags: ['Autenticación'],
         summary: 'Obtener el perfil del usuario autenticado',
-        responses: { 200: okJson('Perfil'), 401: NO_AUTORIZADO }
+        description: 'Solo con sesión JWT.',
+        responses: {
+          200: okJson('Perfil', envuelto({
+            type: 'object',
+            properties: { usuario: ref('PerfilUsuario') }
+          }, false)),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
+        }
       },
       put: {
         tags: ['Autenticación'],
         summary: 'Actualizar el perfil',
+        description: 'Solo con sesión JWT.',
         requestBody: {
           required: true,
           content: {
@@ -262,7 +272,14 @@ workers asíncronos sobre Redis, no en el request.
             }
           }
         },
-        responses: { 200: okJson('Perfil actualizado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Perfil actualizado', envuelto({
+            type: 'object',
+            properties: { usuario: ref('PerfilUsuario') }
+          })),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
+        }
       }
     },
 
@@ -270,6 +287,7 @@ workers asíncronos sobre Redis, no en el request.
       post: {
         tags: ['Autenticación'],
         summary: 'Cambiar la contraseña',
+        description: 'Solo con sesión JWT.',
         requestBody: {
           required: true,
           content: {
@@ -288,7 +306,8 @@ workers asíncronos sobre Redis, no en el request.
         responses: {
           200: okJson('Contraseña actualizada'),
           400: respuestaError('La contraseña actual no coincide'),
-          401: NO_AUTORIZADO
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
         }
       }
     },
@@ -298,7 +317,10 @@ workers asíncronos sobre Redis, no en el request.
         tags: ['Autenticación'],
         summary: 'Cerrar sesión',
         description: 'El JWT no se invalida del lado del servidor: el cliente debe descartarlo.',
-        responses: { 200: okJson('Sesión cerrada'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Sesión cerrada'),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -310,12 +332,19 @@ workers asíncronos sobre Redis, no en el request.
         tags: ['API Keys'],
         summary: 'Listar API Keys',
         description: 'Solo con sesión JWT (no con API Key). Devuelve solo `keyParcial` (prefijo y sufijo): la clave completa no se guarda en la base y no se puede recuperar.',
-        responses: { 200: okJson('Listado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Listado de API Keys del usuario', envuelto({
+            type: 'array',
+            items: ref('ApiKeyResumen')
+          }, false)),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
+        }
       },
       post: {
         tags: ['API Keys'],
         summary: 'Crear una API Key',
-        description: '⚠️ La clave en texto plano se devuelve **una sola vez**, en esta respuesta. Después solo queda su hash: no hay forma de volver a verla.',
+        description: '⚠️ La clave en texto plano se devuelve **una sola vez**, en esta respuesta. Después solo queda su hash: no hay forma de volver a verla. Solo con sesión JWT.',
         requestBody: {
           required: true,
           content: {
@@ -345,24 +374,10 @@ workers asíncronos sobre Redis, no en el request.
           }
         },
         responses: {
-          201: okJson('API Key creada (única vez que se ve la clave)', {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              data: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  key: { type: 'string', description: 'Clave en texto plano — guardala ahora' },
-                  nombre: { type: 'string' },
-                  permisos: { type: 'array', items: { type: 'string' } }
-                }
-              },
-              advertencia: { type: 'string' }
-            }
-          }),
+          201: okJson('API Key creada (única vez que se ve la clave)', ref('ApiKeyCreada')),
           400: respuestaError('Falta el nombre'),
-          401: NO_AUTORIZADO
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
         }
       }
     },
@@ -371,14 +386,26 @@ workers asíncronos sobre Redis, no en el request.
       get: {
         tags: ['API Keys'],
         summary: 'Detalle de una API Key',
+        description: 'Solo con sesión JWT. No incluye la clave ni su hash.',
         parameters: [paramRuta('id', 'ID de la API Key')],
-        responses: { 200: okJson('Detalle'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Detalle', envuelto(ref('ApiKeyResumen'), false)),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)'),
+          404: NO_ENCONTRADO
+        }
       },
       delete: {
         tags: ['API Keys'],
         summary: 'Revocar una API Key',
+        description: 'Solo con sesión JWT.',
         parameters: [paramRuta('id', 'ID de la API Key')],
-        responses: { 200: okJson('Revocada'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Revocada'),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)'),
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -386,9 +413,14 @@ workers asíncronos sobre Redis, no en el request.
       put: {
         tags: ['API Keys'],
         summary: 'Renovar una API Key',
-        description: 'Genera una clave nueva manteniendo nombre y permisos. **La anterior deja de funcionar de inmediato.** La nueva se muestra una sola vez.',
+        description: 'Genera una clave nueva manteniendo nombre y permisos. **La anterior deja de funcionar de inmediato.** La nueva se muestra una sola vez. Solo con sesión JWT.',
         parameters: [paramRuta('id', 'ID de la API Key')],
-        responses: { 200: okJson('Renovada'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Renovada (única vez que se ve la clave nueva)', ref('ApiKeyCreada')),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)'),
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -407,44 +439,19 @@ genera, firma y envía a SET en un worker aparte. Para seguir el avance, usar
 \`GET /api/factura/estado/:facturaId\`.
 
 La empresa emisora se resuelve por el \`param.ruc\`, que debe corresponder a una
-empresa cargada y activa, con certificado válido.
+empresa del alcance del token, activa y con certificado válido.
 `.trim(),
         requestBody: {
           required: true,
           content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/SolicitudFactura' }
-            }
+            'application/json': { schema: ref('SolicitudFactura') }
           }
         },
         responses: {
-          202: okJson('Encolada para procesamiento', {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean' },
-              message: { type: 'string' },
-              data: {
-                type: 'object',
-                properties: {
-                  facturaId: { type: 'string' },
-                  correlativo: { type: 'string', example: '001-001-0000060' },
-                  estado: { type: 'string', example: 'encolado' },
-                  cdc: { type: 'string', nullable: true },
-                  xmlLink: { type: 'string', format: 'uri' },
-                  kudeLink: { type: 'string', format: 'uri' },
-                  urls: {
-                    type: 'object',
-                    properties: {
-                      estado: { type: 'string' },
-                      consulta: { type: 'string' }
-                    }
-                  }
-                }
-              }
-            }
-          }),
+          202: okJson('Encolada para procesamiento', ref('FacturaEncolada')),
           400: respuestaError('Datos inválidos o empresa sin certificado'),
           401: NO_AUTORIZADO,
+          403: respuestaError('El RUC emisor no pertenece al alcance del token (EMPRESA_FUERA_DE_ALCANCE)'),
           404: respuestaError('No existe una empresa con ese RUC')
         }
       }
@@ -457,7 +464,7 @@ empresa cargada y activa, con certificado válido.
         description: 'Útil para que la integración confirme que el RUC está dado de alta antes de emitir.',
         parameters: [paramRuta('ruc', 'RUC con o sin guión (ej: 80055783-2)')],
         responses: {
-          200: okJson('Empresa encontrada'),
+          200: okJson('Empresa encontrada', envuelto(ref('EmpresaEmisora'), false)),
           400: respuestaError('RUC requerido'),
           401: NO_AUTORIZADO,
           404: NO_ENCONTRADO
@@ -469,9 +476,13 @@ empresa cargada y activa, con certificado válido.
       get: {
         tags: ['Facturación'],
         summary: 'Estado de procesamiento de una factura',
-        description: 'Devuelve el estado en la cola y en SIFEN. Es el endpoint a consultar tras un `202` de `/api/facturar/crear`.',
+        description: 'Devuelve el estado en SIFEN y el del trabajo en la cola. Es el endpoint a consultar tras un `202` de `/api/facturar/crear`.',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Estado'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Estado', envuelto(ref('EstadoFacturaCola'))),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -487,7 +498,7 @@ empresa cargada y activa, con certificado válido.
           {
             name: 'estado',
             in: 'query',
-            schema: { $ref: '#/components/schemas/EstadoSifen' },
+            schema: ref('EstadoSifen'),
             description: 'Filtrar por estado en SIFEN'
           },
           {
@@ -500,7 +511,7 @@ empresa cargada y activa, con certificado válido.
             name: 'search',
             in: 'query',
             schema: { type: 'string' },
-            description: 'Texto a buscar (se interpreta según `searchType`)'
+            description: 'Texto a buscar (literal, se interpreta según `searchType`)'
           },
           {
             name: 'searchType',
@@ -509,7 +520,10 @@ empresa cargada y activa, con certificado válido.
             description: 'Campo sobre el que aplica `search`: RUC o nombre del cliente, CDC, tipo de documento, o ID'
           }
         ],
-        responses: { 200: okJson('Listado paginado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Listado paginado', ref('ListadoFacturas')),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -517,8 +531,14 @@ empresa cargada y activa, con certificado válido.
       get: {
         tags: ['Facturas'],
         summary: 'Buscar una factura por CDC',
+        description: 'Primero busca en la base local; si no está, consulta directamente a SIFEN (requiere una empresa con certificado activo).',
         parameters: [paramRuta('cdc', 'Código de Control (44 dígitos)')],
-        responses: { 200: okJson('Factura'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Factura encontrada (local o en SIFEN)', ref('BusquedaPorCdc')),
+          400: respuestaError('CDC requerido, o no hay empresa con certificado para consultar a SIFEN'),
+          401: NO_AUTORIZADO,
+          404: respuestaError('CDC no encontrado ni localmente ni en SIFEN')
+        }
       }
     },
 
@@ -526,9 +546,15 @@ empresa cargada y activa, con certificado válido.
       get: {
         tags: ['Facturas'],
         summary: 'Consultar el estado de un CDC directamente en SET',
-        description: 'Va contra los servicios de la SET, no contra la base local.',
+        description: 'Consulta el CDC en los servicios de la SET usando el certificado de la empresa emisora, y actualiza el estado local si cambió.',
         parameters: [paramRuta('cdc', 'Código de Control (44 dígitos)')],
-        responses: { 200: okJson('Estado según SET'), 401: NO_AUTORIZADO, 500: ERROR_SERVIDOR }
+        responses: {
+          200: okJson('Estado según SET', ref('EstadoSegunSet')),
+          400: respuestaError('La empresa de la factura no tiene certificado cargado'),
+          401: NO_AUTORIZADO,
+          404: respuestaError('Factura no encontrada en la base local'),
+          500: ERROR_SERVIDOR
+        }
       }
     },
 
@@ -538,10 +564,13 @@ empresa cargada y activa, con certificado válido.
         summary: 'Logs de operaciones de facturas',
         parameters: [
           ...paramPagina,
-          { name: 'tipo', in: 'query', schema: { $ref: '#/components/schemas/TipoOperacion' } },
+          { name: 'tipo', in: 'query', schema: ref('TipoOperacion') },
           { name: 'estado', in: 'query', schema: { type: 'string', enum: ['success', 'error', 'warning'] } }
         ],
-        responses: { 200: okJson('Listado paginado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Listado paginado', ref('ListadoLogs')),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -565,7 +594,10 @@ empresa cargada y activa, con certificado válido.
           }
         },
         responses: {
-          200: okJson('Facturas eliminadas'),
+          200: okJson('Facturas eliminadas', envuelto({
+            type: 'object',
+            properties: { deletedCount: { type: 'integer', example: 152 } }
+          })),
           400: respuestaError('Falta la contraseña o no coincide'),
           401: NO_AUTORIZADO,
           403: respuestaError('Requiere sesión de usuario admin')
@@ -578,13 +610,23 @@ empresa cargada y activa, con certificado válido.
         tags: ['Facturas'],
         summary: 'Detalle de una factura',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Factura'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Factura', envuelto(ref('FacturaDetalle'), false)),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       },
       delete: {
         tags: ['Facturas'],
         summary: 'Eliminar una factura',
+        description: 'Requiere el permiso `facturas:eliminar` en API Keys.',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Eliminada'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Eliminada'),
+          401: NO_AUTORIZADO,
+          403: respuestaError('La API Key no tiene el permiso facturas:eliminar'),
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -592,8 +634,16 @@ empresa cargada y activa, con certificado válido.
       get: {
         tags: ['Facturas'],
         summary: 'Logs de una factura',
+        description: 'A diferencia del resto de la API, responde el array directamente (sin envoltorio `{success, data}`).',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Logs'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Logs de la factura, más recientes primero', {
+            type: 'array',
+            items: ref('LogOperacion')
+          }),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -602,7 +652,19 @@ empresa cargada y activa, con certificado válido.
         tags: ['Facturas'],
         summary: 'Eventos SIFEN de una factura',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Eventos'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Eventos de la factura', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              total: { type: 'integer' },
+              eventos: { type: 'array', items: ref('Evento') }
+            }
+          }),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -610,9 +672,22 @@ empresa cargada y activa, con certificado válido.
       post: {
         tags: ['Facturas'],
         summary: 'Reintentar el envío a SIFEN',
-        description: 'Vuelve a encolar una factura que quedó en error.',
+        description: 'Reenvía a SET el XML ya firmado de una factura que quedó en error. Requiere `facturas:crear` en API Keys.',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Reencolada'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Reenvío completado', envuelto({
+            type: 'object',
+            properties: {
+              invoice: ref('FacturaResumen'),
+              estado: ref('EstadoSifen'),
+              codigoRetorno: { type: 'string', nullable: true, example: '0260' },
+              mensajeRetorno: { type: 'string', nullable: true }
+            }
+          })),
+          400: respuestaError('El XML no existe en disco, o la factura ya está en un estado final'),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -620,9 +695,14 @@ empresa cargada y activa, con certificado válido.
       post: {
         tags: ['Facturas'],
         summary: 'Refrescar el estado desde SET',
-        description: 'Consulta el CDC en SET y actualiza el estado local.',
+        description: 'Consulta el CDC en SET y actualiza el estado local. Si la factura ya está en un estado final (aceptado/rechazado/error/observado) no consulta: esos estados no cambian.',
         parameters: [paramRuta('id', 'ID de la factura')],
-        responses: { 200: okJson('Estado actualizado'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Resultado de la consulta', ref('RefreshEstado')),
+          400: respuestaError('La factura no tiene CDC asignado'),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -633,7 +713,7 @@ empresa cargada y activa, con certificado válido.
         parameters: [paramRuta('id', 'ID de la factura')],
         responses: {
           200: {
-            description: 'XML firmado',
+            description: 'XML firmado (attachment)',
             content: { 'application/xml': { schema: { type: 'string', format: 'binary' } } }
           },
           401: NO_AUTORIZADO,
@@ -650,7 +730,7 @@ empresa cargada y activa, con certificado válido.
         parameters: [paramRuta('id', 'ID de la factura')],
         responses: {
           200: {
-            description: 'KUDE en PDF',
+            description: 'KUDE en PDF (attachment)',
             content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } }
           },
           401: NO_AUTORIZADO,
@@ -666,7 +746,13 @@ empresa cargada y activa, con certificado válido.
       get: {
         tags: ['Empresas'],
         summary: 'Listar empresas',
-        responses: { 200: okJson('Listado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Empresas del usuario', envuelto({
+            type: 'array',
+            items: ref('EmpresaCompleta')
+          }, false)),
+          401: NO_AUTORIZADO
+        }
       },
       post: {
         tags: ['Empresas'],
@@ -675,15 +761,14 @@ empresa cargada y activa, con certificado válido.
         requestBody: {
           required: true,
           content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/Empresa' }
-            }
+            'application/json': { schema: ref('Empresa') }
           }
         },
         responses: {
-          201: okJson('Empresa creada'),
+          201: okJson('Empresa creada', envuelto(ref('EmpresaCompleta'))),
           400: respuestaError('Faltan campos requeridos o el RUC/CSC no cumple el formato'),
-          401: NO_AUTORIZADO
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
         }
       }
     },
@@ -693,23 +778,39 @@ empresa cargada y activa, con certificado válido.
         tags: ['Empresas'],
         summary: 'Detalle de una empresa',
         parameters: [paramRuta('id', 'ID de la empresa')],
-        responses: { 200: okJson('Empresa'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Empresa', envuelto(ref('EmpresaCompleta'), false)),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       },
       put: {
         tags: ['Empresas'],
         summary: 'Actualizar una empresa',
+        description: 'Solo con sesión JWT.',
         parameters: [paramRuta('id', 'ID de la empresa')],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/Empresa' } } }
+          content: { 'application/json': { schema: ref('Empresa') } }
         },
-        responses: { 200: okJson('Actualizada'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Actualizada', envuelto(ref('EmpresaCompleta'))),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)'),
+          404: NO_ENCONTRADO
+        }
       },
       delete: {
         tags: ['Empresas'],
         summary: 'Eliminar una empresa',
+        description: 'Solo con sesión JWT.',
         parameters: [paramRuta('id', 'ID de la empresa')],
-        responses: { 200: okJson('Eliminada'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Eliminada'),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)'),
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -719,7 +820,7 @@ empresa cargada y activa, con certificado válido.
         summary: 'Subir el certificado digital (.p12)',
         description: `
 Sube el certificado F1 emitido por un Prestador Cualificado de Servicios de
-Confianza. Solo se aceptan archivos \`.p12\`, hasta 5 MB.
+Confianza. Solo se aceptan archivos \`.p12\`, hasta 5 MB. Solo con sesión JWT.
 
 La contraseña se cifra con AES-256-GCM usando \`CERTIFICADO_MASTER_KEY\` antes
 de guardarse: **esa variable de entorno tiene que estar configurada antes de
@@ -743,9 +844,16 @@ quedan indescifrables.
           }
         },
         responses: {
-          200: okJson('Certificado cargado'),
+          200: okJson('Certificado cargado', envuelto({
+            type: 'object',
+            properties: {
+              nombreArchivo: { type: 'string', example: 'kingston-f1.p12' },
+              fechaCarga: fechaHora()
+            }
+          })),
           400: respuestaError('Archivo no es .p12, supera 5 MB, o la contraseña no abre el certificado'),
           401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)'),
           404: NO_ENCONTRADO
         }
       }
@@ -757,7 +865,11 @@ quedan indescifrables.
         summary: 'Validar el certificado cargado',
         description: 'Verifica que el .p12 se pueda abrir con la contraseña guardada e informa su vencimiento.',
         parameters: [paramRuta('id', 'ID de la empresa')],
-        responses: { 200: okJson('Resultado de la validación'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Resultado de la validación', envuelto(ref('ValidacionCertificado'), false)),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -766,7 +878,11 @@ quedan indescifrables.
         tags: ['Empresas'],
         summary: 'Estadísticas de una empresa',
         parameters: [paramRuta('id', 'ID de la empresa')],
-        responses: { 200: okJson('Estadísticas'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Estadísticas', envuelto(ref('EstadisticasEmpresa'), false)),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -794,8 +910,8 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
                 type: 'object',
                 required: ['invoiceId', 'tipoEvento', 'descripcion'],
                 properties: {
-                  invoiceId: { type: 'string', description: 'ID de la factura' },
-                  tipoEvento: { $ref: '#/components/schemas/TipoEvento' },
+                  invoiceId: objectId('ID de la factura'),
+                  tipoEvento: ref('TipoEvento'),
                   descripcion: { type: 'string', description: 'Motivo del evento' },
                   usuario: {
                     type: 'object',
@@ -811,8 +927,8 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           }
         },
         responses: {
-          200: okJson('Evento enviado a SET'),
-          400: respuestaError('Faltan campos, el tipo no es válido, o la factura no está aprobada'),
+          200: okJson('Evento enviado a SET', envuelto(ref('ResultadoEvento'))),
+          400: respuestaError('Faltan campos, el tipo no es válido, la factura no está aprobada, o la cancelación está fuera de plazo (EVENTO_CANCELACION_FUERA_DE_PLAZO, con horasLimite y horasTranscurridas)'),
           401: NO_AUTORIZADO,
           404: respuestaError('Factura no encontrada')
         }
@@ -825,7 +941,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         summary: 'Listar eventos',
         parameters: [
           ...paramPagina,
-          { name: 'tipoEvento', in: 'query', schema: { $ref: '#/components/schemas/TipoEvento' } },
+          { name: 'tipoEvento', in: 'query', schema: ref('TipoEvento') },
           {
             name: 'estadoEvento',
             in: 'query',
@@ -833,7 +949,19 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           },
           { name: 'cdc', in: 'query', schema: { type: 'string' } }
         ],
-        responses: { 200: okJson('Listado paginado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Listado paginado', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              eventos: { type: 'array', items: ref('Evento') },
+              totalPages: { type: 'integer' },
+              currentPage: { type: 'integer' },
+              total: { type: 'integer' }
+            }
+          }),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -842,7 +970,18 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         tags: ['Eventos SIFEN'],
         summary: 'Eventos de una factura',
         parameters: [paramRuta('invoiceId', 'ID de la factura')],
-        responses: { 200: okJson('Eventos'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Eventos', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              total: { type: 'integer' },
+              eventos: { type: 'array', items: ref('Evento') }
+            }
+          }),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -851,7 +990,17 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         tags: ['Eventos SIFEN'],
         summary: 'Eventos por CDC',
         parameters: [paramRuta('cdc', 'Código de Control')],
-        responses: { 200: okJson('Eventos'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Eventos', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              total: { type: 'integer' },
+              eventos: { type: 'array', items: ref('Evento') }
+            }
+          }),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -860,7 +1009,17 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         tags: ['Eventos SIFEN'],
         summary: 'Detalle de un evento',
         parameters: [paramRuta('id', 'ID del evento')],
-        responses: { 200: okJson('Evento'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Evento', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              evento: ref('Evento')
+            }
+          }),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -882,7 +1041,19 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           { name: 'empresaId', in: 'query', schema: { type: 'string' } },
           { name: 'tipoDocumento', in: 'query', schema: { type: 'string' } }
         ],
-        responses: { 200: okJson('Listado paginado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Listado paginado', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'array', items: ref('Lote') },
+              total: { type: 'integer' },
+              page: { type: 'integer' },
+              totalPages: { type: 'integer' }
+            }
+          }),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -891,13 +1062,23 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         tags: ['Lotes'],
         summary: 'Detalle de un lote',
         parameters: [paramRuta('id', 'ID del lote')],
-        responses: { 200: okJson('Lote'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Lote', envuelto(ref('Lote'), false)),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       },
       delete: {
         tags: ['Lotes'],
         summary: 'Eliminar un lote',
+        description: 'Solo lotes en estado `en_espera` o `error`. Requiere `facturas:eliminar` en API Keys.',
         parameters: [paramRuta('id', 'ID del lote')],
-        responses: { 200: okJson('Eliminado'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Eliminado'),
+          400: respuestaError('El lote no está en un estado eliminable'),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -905,8 +1086,13 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       post: {
         tags: ['Lotes'],
         summary: 'Enviar un lote a SET',
+        description: 'Requiere `facturas:crear` en API Keys.',
         parameters: [paramRuta('id', 'ID del lote')],
-        responses: { 200: okJson('Lote enviado'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Lote enviado', envuelto(ref('Lote'))),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -914,7 +1100,22 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       post: {
         tags: ['Lotes'],
         summary: 'Enviar todos los lotes en espera',
-        responses: { 200: okJson('Lotes enviados'), 401: NO_AUTORIZADO }
+        description: 'Requiere `facturas:crear` en API Keys.',
+        responses: {
+          200: okJson('Resultado por lote', envuelto({
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                loteId: objectId(),
+                estado: { type: 'string' },
+                error: { type: 'string', nullable: true }
+              },
+              additionalProperties: true
+            }
+          }, false)),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -922,8 +1123,17 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       post: {
         tags: ['Lotes'],
         summary: 'Consultar el resultado de un lote en SET',
+        description: 'Consulta el número de lote en SET y actualiza el estado de cada factura del lote. Requiere `facturas:crear` en API Keys.',
         parameters: [paramRuta('id', 'ID del lote')],
-        responses: { 200: okJson('Resultado del lote'), 401: NO_AUTORIZADO, 404: NO_ENCONTRADO }
+        responses: {
+          200: okJson('Resultado de la consulta', envuelto({
+            type: 'object',
+            description: 'Estado del lote y de sus facturas según SET',
+            additionalProperties: true
+          }, false)),
+          401: NO_AUTORIZADO,
+          404: NO_ENCONTRADO
+        }
       }
     },
 
@@ -935,7 +1145,10 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         tags: ['Cola'],
         summary: 'Estadísticas de las colas',
         description: 'Trabajos en espera, activos, completados y fallidos de las colas `facturacion` y `kude`.',
-        responses: { 200: okJson('Estadísticas'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Contadores por cola', envuelto(ref('ColaEstadisticas'))),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -943,8 +1156,15 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       get: {
         tags: ['Cola'],
         summary: 'Trabajos recientes',
+        description: 'Trabajos de ambas colas combinados, más recientes primero.',
         parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } }],
-        responses: { 200: okJson('Trabajos'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Trabajos recientes', envuelto({
+            type: 'array',
+            items: ref('TrabajoCola')
+          })),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -952,8 +1172,13 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       post: {
         tags: ['Cola'],
         summary: 'Limpiar trabajos completados',
-        requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/LimpiezaCola' } } } },
-        responses: { 200: okJson('Cola limpiada'), 401: NO_AUTORIZADO }
+        description: 'Requiere sesión JWT de admin.',
+        requestBody: { content: { 'application/json': { schema: ref('LimpiezaCola') } } },
+        responses: {
+          200: okJson('Cola limpiada', ref('ResultadoLimpieza')),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario admin')
+        }
       }
     },
 
@@ -961,8 +1186,13 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       post: {
         tags: ['Cola'],
         summary: 'Limpiar trabajos completados',
-        requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/LimpiezaCola' } } } },
-        responses: { 200: okJson('Cola limpiada'), 401: NO_AUTORIZADO }
+        description: 'Requiere sesión JWT de admin.',
+        requestBody: { content: { 'application/json': { schema: ref('LimpiezaCola') } } },
+        responses: {
+          200: okJson('Cola limpiada', ref('ResultadoLimpieza')),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario admin')
+        }
       }
     },
 
@@ -970,6 +1200,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       post: {
         tags: ['Cola'],
         summary: 'Limpiar trabajos fallidos',
+        description: 'Requiere sesión JWT de admin.',
         requestBody: {
           content: {
             'application/json': {
@@ -982,7 +1213,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
             }
           }
         },
-        responses: { 200: okJson('Cola limpiada'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Cola limpiada', ref('ResultadoLimpieza')),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario admin')
+        }
       }
     },
 
@@ -1003,7 +1238,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
             }
           }
         },
-        responses: { 200: okJson('Cola vaciada'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Cola vaciada', ref('ResultadoLimpieza')),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario admin')
+        }
       }
     },
 
@@ -1018,10 +1257,13 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 15 } },
           { name: 'estado', in: 'query', schema: { type: 'string', enum: ['success', 'error', 'warning'] } },
-          { name: 'tipoOperacion', in: 'query', schema: { $ref: '#/components/schemas/TipoOperacion' } },
+          { name: 'tipoOperacion', in: 'query', schema: ref('TipoOperacion') },
           { name: 'invoiceId', in: 'query', schema: { type: 'string' } }
         ],
-        responses: { 200: okJson('Listado paginado'), 401: NO_AUTORIZADO }
+        responses: {
+          200: okJson('Listado paginado', ref('ListadoLogs')),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -1039,7 +1281,10 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           }
         ],
         responses: {
-          200: okJson('Logs eliminados'),
+          200: okJson('Logs eliminados', envuelto({
+            type: 'object',
+            properties: { deletedCount: { type: 'integer', example: 320 } }
+          })),
           401: NO_AUTORIZADO,
           403: respuestaError('Requiere sesión de usuario admin')
         }
@@ -1053,8 +1298,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       get: {
         tags: ['Estadísticas'],
         summary: 'Estadísticas generales',
-        description: 'Totales por estado, facturas del día, tendencia de los últimos 7 días y uptime del proceso.',
-        responses: { 200: okJson('Estadísticas'), 401: NO_AUTORIZADO }
+        description: 'Totales por estado, facturas del día, tendencia de los últimos 7 días y uptime del proceso. Limitado a las empresas del alcance.',
+        responses: {
+          200: okJson('Estadísticas', envuelto(ref('Estadisticas'), false)),
+          401: NO_AUTORIZADO
+        }
       }
     },
 
@@ -1062,11 +1310,22 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       get: {
         tags: ['Consultas SET'],
         summary: 'Consultar un RUC en SET',
-        description: 'Consulta el padrón de la SET para validar un RUC de cliente antes de facturarle.',
+        description: 'Consulta el padrón de la SET para validar un RUC de cliente antes de facturarle. Usa el certificado de una empresa del alcance.',
         parameters: [paramRuta('ruc', 'RUC a consultar')],
         responses: {
-          200: okJson('Datos del contribuyente'),
-          400: respuestaError('RUC requerido'),
+          200: okJson('Datos del contribuyente', envuelto({
+            type: 'object',
+            properties: {
+              ruc: { type: 'string' },
+              encontrado: { type: 'boolean', example: true },
+              respuesta: {
+                type: 'object',
+                description: 'Respuesta SOAP de SET parseada (razón social, estado del contribuyente, etc.)',
+                additionalProperties: true
+              }
+            }
+          }, false)),
+          400: respuestaError('RUC requerido, o no hay empresa con certificado activo para firmar la consulta'),
           401: NO_AUTORIZADO,
           404: respuestaError('RUC no encontrado en SET')
         }
@@ -1087,41 +1346,37 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
     },
 
     schemas: {
+      // ------------------------------ genéricos ------------------------------
       Error: {
         type: 'object',
         properties: {
           success: { type: 'boolean', example: false },
-          error: { type: 'string', description: 'Código de error', example: 'FACTURA_NOT_FOUND' },
+          error: { type: 'string', description: 'Código de error estable (para lógica del cliente)', example: 'FACTURA_NOT_FOUND' },
           message: { type: 'string', description: 'Descripción legible' }
         }
       },
 
       RespuestaOk: {
         type: 'object',
+        description: 'Confirmación sin datos adicionales',
         properties: {
           success: { type: 'boolean', example: true },
-          message: { type: 'string' },
-          data: { type: 'object' }
+          message: { type: 'string' }
         }
       },
 
-      Usuario: {
-        type: 'object',
-        properties: {
-          _id: { type: 'string' },
-          username: { type: 'string' },
-          email: { type: 'string', format: 'email' },
-          nombre: { type: 'string' },
-          apellido: { type: 'string' },
-          rol: { type: 'string', enum: ['admin', 'usuario', 'contador'] },
-          activo: { type: 'boolean' }
-        }
-      },
-
+      // ------------------------------ enums ------------------------------
       EstadoSifen: {
         type: 'string',
         enum: ['recibido', 'encolado', 'procesando', 'enviado', 'aceptado', 'observado', 'rechazado', 'error'],
-        description: 'Estado del documento en SIFEN'
+        description: 'Estado del documento en SIFEN. aceptado/observado/rechazado/error son finales.'
+      },
+
+      Proceso: {
+        type: 'string',
+        nullable: true,
+        enum: ['Completado', 'No completado', null],
+        description: 'Completado cuando el DTE fue resuelto por SET y el KUDE generado'
       },
 
       TipoOperacion: {
@@ -1147,6 +1402,483 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         description: 'Emisor: cancelacion, devolucion_ajuste. Receptor: el resto.'
       },
 
+      // ------------------------------ salud / auth ------------------------------
+      SaludServicio: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean', example: true },
+          servicio: { type: 'string', example: 'dtepy-backend' },
+          version: { type: 'string', example: version },
+          mongo: {
+            type: 'string',
+            enum: ['desconectado', 'conectado', 'conectando', 'desconectando'],
+            description: 'Estado de la conexión a MongoDB'
+          },
+          fecha: { type: 'string', format: 'date-time' }
+        }
+      },
+
+      Usuario: {
+        type: 'object',
+        properties: {
+          id: objectId(),
+          username: { type: 'string', example: 'fabian' },
+          email: { type: 'string', format: 'email' },
+          nombre: { type: 'string' },
+          apellido: { type: 'string' },
+          rol: { type: 'string', enum: ['admin', 'usuario', 'contador'] }
+        }
+      },
+
+      PerfilUsuario: {
+        allOf: [
+          ref('Usuario'),
+          {
+            type: 'object',
+            properties: {
+              activo: { type: 'boolean' },
+              ultimoAcceso: fechaHora(),
+              fechaCreacion: fechaHora()
+            }
+          }
+        ]
+      },
+
+      LoginRespuesta: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string', example: 'Login exitoso' },
+          data: {
+            type: 'object',
+            properties: {
+              usuario: ref('Usuario'),
+              token: { type: 'string', description: 'JWT para la cabecera Authorization', example: 'eyJhbGciOiJIUzI1NiIs...' }
+            }
+          }
+        }
+      },
+
+      // ------------------------------ api keys ------------------------------
+      ApiKeyResumen: {
+        type: 'object',
+        properties: {
+          id: objectId(),
+          nombre: { type: 'string', example: 'Integración ERPNext' },
+          descripcion: { type: 'string' },
+          permisos: {
+            type: 'array',
+            items: { type: 'string', enum: ['facturas:crear', 'facturas:leer', 'facturas:eliminar', 'stats:leer', 'admin'] }
+          },
+          activa: { type: 'boolean' },
+          expiracion: fechaHora('null = no vence'),
+          ultimoUso: fechaHora(),
+          fechaCreacion: fechaHora(),
+          keyParcial: {
+            type: 'string',
+            example: 'a1b2c3d4...e5f6a7b8',
+            description: 'Prefijo y sufijo para identificarla; la clave completa no se puede recuperar'
+          }
+        }
+      },
+
+      ApiKeyCreada: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            properties: {
+              id: objectId(),
+              key: {
+                type: 'string',
+                example: '3f9c2b8e71a4d5f6b0c9e8d7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7',
+                description: '⚠️ Única vez que se muestra: no queda guardada en la base'
+              },
+              nombre: { type: 'string' },
+              descripcion: { type: 'string' },
+              permisos: { type: 'array', items: { type: 'string' } },
+              expiracion: fechaHora(),
+              fechaCreacion: fechaHora()
+            }
+          },
+          advertencia: { type: 'string', example: 'Guarda esta API Key en un lugar seguro. No podrás verla nuevamente.' }
+        }
+      },
+
+      // ------------------------------ facturación ------------------------------
+      FacturaEncolada: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string', example: 'Factura encolada para procesamiento asíncrono' },
+          data: {
+            type: 'object',
+            properties: {
+              facturaId: objectId(),
+              correlativo: { type: 'string', example: '001-001-0000060' },
+              estado: ref('EstadoSifen'),
+              proceso: ref('Proceso'),
+              cdc: { type: 'string', nullable: true, description: '44 dígitos; null hasta que se firma el XML' },
+              jobId: { type: 'string', example: 'factura-68ae1f2b9c3d4e5f6a7b8c9d' },
+              xmlLink: { type: 'string', format: 'uri' },
+              kudeLink: { type: 'string', format: 'uri' },
+              urls: {
+                type: 'object',
+                properties: {
+                  estado: { type: 'string', example: '/api/factura/estado/68ae1f2b9c3d4e5f6a7b8c9d' },
+                  consulta: { type: 'string', example: '/api/invoices/68ae1f2b9c3d4e5f6a7b8c9d' }
+                }
+              },
+              reintentando: { type: 'boolean', description: 'Presente cuando el correlativo ya existía en error y se reintenta' },
+              kudeJobId: { type: 'string', description: 'Presente cuando la factura ya estaba aprobada y solo se regenera el PDF' }
+            }
+          }
+        }
+      },
+
+      EmpresaEmisora: {
+        type: 'object',
+        description: 'Vista mínima de la empresa para integraciones',
+        properties: {
+          ruc: { type: 'string', example: '80055783-2' },
+          nombreFantasia: { type: 'string', example: 'Kingston Center' },
+          razonSocial: { type: 'string', example: 'Kingston Center S.A.' },
+          tieneCertificadoValido: { type: 'boolean' },
+          activo: { type: 'boolean' }
+        }
+      },
+
+      EstadoFacturaCola: {
+        type: 'object',
+        properties: {
+          facturaId: objectId(),
+          correlativo: { type: 'string', example: '001-001-0000060' },
+          estado: ref('EstadoSifen'),
+          cdc: { type: 'string', nullable: true },
+          codigoRetorno: { type: 'string', nullable: true, example: '0260', description: 'Código de respuesta de SET (0260 = aprobado)' },
+          mensajeRetorno: { type: 'string', nullable: true },
+          fechaCreacion: fechaHora(),
+          fechaEnvio: fechaHora(),
+          tipoEmision: { type: 'integer', example: 1 },
+          grupoLoteId: { ...objectId('Lote al que pertenece, si se envía por lotes'), nullable: true },
+          proceso: ref('Proceso'),
+          job: {
+            type: 'object',
+            description: 'Estado del trabajo en la cola de Bull',
+            properties: {
+              status: {
+                type: 'string',
+                nullable: true,
+                enum: ['waiting', 'active', 'completed', 'failed', 'delayed', 'paused', null],
+                description: 'null si el trabajo ya no está en la cola'
+              },
+              progress: { type: 'integer', minimum: 0, maximum: 100, example: 100 },
+              attempts: { type: 'integer', example: 1 },
+              failedReason: { type: 'string', nullable: true }
+            }
+          }
+        }
+      },
+
+      // ------------------------------ facturas ------------------------------
+      FacturaResumen: {
+        type: 'object',
+        description: 'Documento de factura como viene de la base, con alias de compatibilidad',
+        properties: {
+          _id: objectId(),
+          empresaId: objectId('Empresa emisora'),
+          rucEmpresa: { type: 'string', example: '80055783-2' },
+          correlativo: { type: 'string', example: '001-001-0000060' },
+          cdc: { type: 'string', nullable: true },
+          estadoSifen: ref('EstadoSifen'),
+          estado: { allOf: [ref('EstadoSifen')], description: 'Alias de estadoSifen' },
+          estadoVisual: { type: 'string', description: 'Estado simplificado para la UI', example: 'aceptado' },
+          proceso: ref('Proceso'),
+          de: { type: 'string', description: 'Descripción del tipo de documento', example: 'Factura electrónica' },
+          cliente: {
+            type: 'object',
+            properties: {
+              ruc: { type: 'string' },
+              nombre: { type: 'string' }
+            },
+            additionalProperties: true
+          },
+          total: { type: 'number', example: 1500000 },
+          codigoRetorno: { type: 'string', nullable: true },
+          mensajeRetorno: { type: 'string', nullable: true },
+          digestValue: { type: 'string', nullable: true },
+          xmlPath: { type: 'string', nullable: true },
+          kudePath: { type: 'string', nullable: true },
+          grupoLoteId: { ...objectId(), nullable: true },
+          fechaCreacion: fechaHora(),
+          fechaEnvio: fechaHora(),
+          fechaProceso: fechaHora('Fecha de resolución en SET'),
+          createdAt: fechaHora(),
+          updatedAt: fechaHora()
+        },
+        additionalProperties: true
+      },
+
+      ListadoFacturas: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          message: { type: 'string' },
+          invoices: { type: 'array', items: ref('FacturaResumen') },
+          totalPages: { type: 'integer', example: 8 },
+          currentPage: { type: 'integer', example: 1 },
+          total: { type: 'integer', example: 73 }
+        }
+      },
+
+      FacturaDetalle: {
+        type: 'object',
+        properties: {
+          facturaId: objectId(),
+          correlativo: { type: 'string', example: '001-001-0000060' },
+          cdc: { type: 'string', nullable: true },
+          estado: ref('EstadoSifen'),
+          proceso: ref('Proceso'),
+          estadoVisual: { type: 'string', example: 'aceptado' },
+          esEstadoFinal: { type: 'boolean', description: 'aceptado/rechazado/error/observado no cambian más' },
+          recomendarRefresh: { type: 'boolean', description: 'true si conviene consultar el estado en SET' },
+          xmlPath: { type: 'string', nullable: true },
+          kudePath: { type: 'string', nullable: true },
+          xmlLink: { type: 'string', format: 'uri', nullable: true },
+          kudeLink: { type: 'string', format: 'uri', nullable: true },
+          cliente: { type: 'object', additionalProperties: true },
+          total: { type: 'number' },
+          fechaCreacion: fechaHora(),
+          fechaEnvio: fechaHora(),
+          fechaProceso: fechaHora(),
+          codigoRetorno: { type: 'string', nullable: true, example: '0260' },
+          mensajeRetorno: { type: 'string', nullable: true },
+          digestValue: { type: 'string', nullable: true },
+          qrCode: { type: 'string', nullable: true, description: 'URL del QR impreso en el KUDE' },
+          datosFactura: { type: 'object', nullable: true, description: 'JSON original con el que se emitió', additionalProperties: true },
+          xmlContent: { type: 'string', nullable: true, description: 'XML firmado completo' },
+          de: { type: 'string', example: 'Factura electrónica' },
+          tipoEmision: { type: 'integer', example: 1 },
+          grupoLoteId: { ...objectId(), nullable: true }
+        }
+      },
+
+      BusquedaPorCdc: {
+        type: 'object',
+        description: 'La fuente indica de dónde salió el resultado',
+        properties: {
+          success: { type: 'boolean' },
+          message: { type: 'string' },
+          encontrado: { type: 'boolean' },
+          fuente: { type: 'string', enum: ['local', 'sifen'] },
+          data: {
+            type: 'object',
+            description: 'Con fuente=local: resumen de la factura (FacturaResumen). Con fuente=sifen: { respuesta } cruda de SET.',
+            additionalProperties: true
+          }
+        }
+      },
+
+      EstadoSegunSet: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          encontrado: { type: 'boolean' },
+          cdc: { type: 'string' },
+          estadoLocal: ref('EstadoSifen'),
+          estadoSET: { type: 'string', nullable: true, description: 'Estado del documento según la consulta a SET' },
+          actualizado: { type: 'boolean', description: 'true si el estado local se actualizó con esta consulta' }
+        },
+        additionalProperties: true
+      },
+
+      RefreshEstado: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          message: { type: 'string' },
+          esEstadoFinal: { type: 'boolean' },
+          consultoSET: { type: 'boolean', description: 'false si no hizo falta consultar (estado final)' },
+          estadoAnterior: ref('EstadoSifen'),
+          estadoNuevo: { allOf: [ref('EstadoSifen')], description: 'Presente si consultó a SET' }
+        },
+        additionalProperties: true
+      },
+
+      // ------------------------------ logs ------------------------------
+      LogOperacion: {
+        type: 'object',
+        properties: {
+          _id: objectId(),
+          invoiceId: {
+            type: 'object',
+            nullable: true,
+            description: 'Factura relacionada (populada), o null en operaciones globales',
+            properties: {
+              _id: objectId(),
+              correlativo: { type: 'string' },
+              cdc: { type: 'string', nullable: true },
+              estadoSifen: ref('EstadoSifen')
+            }
+          },
+          tipoOperacion: ref('TipoOperacion'),
+          descripcion: { type: 'string', example: 'XML firmado exitosamente' },
+          estado: { type: 'string', enum: ['success', 'error', 'warning'] },
+          fecha: fechaHora(),
+          detalle: { type: 'object', nullable: true, description: 'Contexto adicional de la operación', additionalProperties: true }
+        }
+      },
+
+      ListadoLogs: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          logs: { type: 'array', items: ref('LogOperacion') },
+          total: { type: 'integer', example: 320 },
+          page: { type: 'integer', example: 1 },
+          limit: { type: 'integer', example: 15 },
+          totalPages: { type: 'integer', example: 22 }
+        }
+      },
+
+      // ------------------------------ eventos ------------------------------
+      Evento: {
+        type: 'object',
+        properties: {
+          _id: objectId(),
+          tipoEvento: ref('TipoEvento'),
+          cdc: { type: 'string' },
+          correlativo: { type: 'string' },
+          invoiceId: {
+            type: 'object',
+            nullable: true,
+            description: 'Factura relacionada (populada en algunos endpoints)',
+            properties: {
+              _id: objectId(),
+              correlativo: { type: 'string' },
+              cdc: { type: 'string' },
+              estadoSifen: ref('EstadoSifen')
+            }
+          },
+          empresaId: {
+            type: 'object',
+            nullable: true,
+            description: 'Empresa emisora (populada en algunos endpoints)',
+            properties: {
+              _id: objectId(),
+              ruc: { type: 'string' },
+              nombreFantasia: { type: 'string' }
+            }
+          },
+          descripcion: { type: 'string', description: 'Motivo declarado del evento' },
+          estadoEvento: { type: 'string', enum: ['enviado', 'registrado', 'rechazado', 'error'] },
+          codigoRetorno: { type: 'string', nullable: true },
+          mensajeRetorno: { type: 'string', nullable: true },
+          idEventoSET: { type: 'string', nullable: true, description: 'Identificador que asigna SET al registrar el evento' },
+          fechaRegistro: fechaHora(),
+          createdAt: fechaHora()
+        },
+        additionalProperties: true
+      },
+
+      ResultadoEvento: {
+        type: 'object',
+        properties: {
+          eventoId: objectId('ID del evento guardado'),
+          idEventoSET: { type: 'string', nullable: true },
+          codigoRetorno: { type: 'string', nullable: true, example: '0600', description: '0600/0601 = evento registrado' },
+          mensajeRetorno: { type: 'string', nullable: true },
+          estadoEvento: { type: 'string', enum: ['enviado', 'registrado', 'rechazado', 'error'] },
+          tipoEvento: ref('TipoEvento'),
+          cdc: { type: 'string' },
+          correlativo: { type: 'string' }
+        }
+      },
+
+      // ------------------------------ lotes ------------------------------
+      Lote: {
+        type: 'object',
+        properties: {
+          _id: objectId(),
+          empresaId: {
+            type: 'object',
+            description: 'Empresa emisora (populada)',
+            properties: {
+              _id: objectId(),
+              ruc: { type: 'string' },
+              nombreFantasia: { type: 'string' },
+              razonSocial: { type: 'string' }
+            }
+          },
+          tipoDocumento: { type: 'string', example: 'factura' },
+          descripcion: { type: 'string' },
+          ambiente: { type: 'string', enum: ['test', 'produccion'] },
+          estado: { type: 'string', enum: ['en_espera', 'enviado', 'procesando', 'completado', 'error'] },
+          count: { type: 'integer', description: 'Cantidad de facturas del lote' },
+          facturas: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                facturaId: {
+                  type: 'object',
+                  description: 'Factura del lote (populada)',
+                  properties: {
+                    _id: objectId(),
+                    correlativo: { type: 'string' },
+                    cdc: { type: 'string', nullable: true },
+                    estadoSifen: ref('EstadoSifen')
+                  }
+                },
+                estadoIndividual: {
+                  type: 'string',
+                  enum: ['pendiente', 'aceptado', 'rechazado', 'observado', 'error'],
+                  description: 'Resultado de esta factura dentro del lote'
+                }
+              }
+            }
+          },
+          createdAt: fechaHora(),
+          updatedAt: fechaHora()
+        },
+        additionalProperties: true
+      },
+
+      // ------------------------------ cola ------------------------------
+      ContadoresCola: {
+        type: 'object',
+        properties: {
+          waiting: { type: 'integer', example: 2, description: 'En espera de un worker' },
+          active: { type: 'integer', example: 1, description: 'Procesándose ahora' },
+          completed: { type: 'integer', example: 148 },
+          failed: { type: 'integer', example: 3 }
+        }
+      },
+
+      ColaEstadisticas: {
+        type: 'object',
+        properties: {
+          facturacion: ref('ContadoresCola'),
+          kude: ref('ContadoresCola')
+        }
+      },
+
+      TrabajoCola: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', example: 'factura-68ae1f2b9c3d4e5f6a7b8c9d' },
+          queue: { type: 'string', enum: ['facturacion', 'kude'] },
+          estado: { type: 'string', enum: ['waiting', 'active', 'completed', 'failed'] },
+          correlativo: { type: 'string', example: '001-001-0000060' },
+          ruc: { type: 'string', description: 'RUC del cliente o emisor asociado al trabajo' },
+          timestamp: { type: 'number', description: 'Epoch ms del último cambio de estado', example: 1787788748870 },
+          error: { type: 'string', nullable: true, description: 'Motivo del fallo, si falló' },
+          attempts: { type: 'integer', example: 1 }
+        }
+      },
+
       LimpiezaCola: {
         type: 'object',
         properties: {
@@ -1155,8 +1887,89 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         }
       },
 
+      ResultadoLimpieza: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          message: { type: 'string', example: 'Se eliminaron 148 trabajos de la cola facturacion' },
+          data: {
+            type: 'object',
+            properties: {
+              eliminados: { type: 'integer', example: 148 },
+              queue: { type: 'string', enum: ['facturacion', 'kude'] }
+            },
+            additionalProperties: true
+          }
+        }
+      },
+
+      // ------------------------------ estadísticas ------------------------------
+      ConteoPorEstado: {
+        type: 'object',
+        properties: {
+          _id: { allOf: [ref('EstadoSifen')], description: 'El estado agrupado' },
+          count: { type: 'integer', example: 25 }
+        }
+      },
+
+      Estadisticas: {
+        type: 'object',
+        properties: {
+          totalFacturas: { type: 'integer', example: 73 },
+          facturasPorEstado: { type: 'array', items: ref('ConteoPorEstado') },
+          facturasProcesando: { type: 'integer' },
+          facturasEnviadas: { type: 'integer' },
+          facturasError: { type: 'integer' },
+          facturasRechazadas: { type: 'integer' },
+          facturasAceptadas: { type: 'integer' },
+          facturasHoy: { type: 'integer', example: 3 },
+          ultimasFacturas: {
+            type: 'array',
+            description: 'Últimas 10, con campos resumidos',
+            items: {
+              type: 'object',
+              properties: {
+                _id: objectId(),
+                correlativo: { type: 'string' },
+                cdc: { type: 'string', nullable: true },
+                estadoSifen: ref('EstadoSifen'),
+                fechaCreacion: fechaHora(),
+                total: { type: 'number' }
+              }
+            }
+          },
+          tendenciasPorDia: {
+            type: 'array',
+            description: 'Últimos 7 días',
+            items: {
+              type: 'object',
+              properties: {
+                _id: { type: 'string', example: '2026-08-26', description: 'Día (YYYY-MM-DD)' },
+                count: { type: 'integer', example: 12 },
+                total: { type: 'number', example: 18500000, description: 'Suma de montos del día' }
+              }
+            }
+          },
+          fechaUltimaConsulta: fechaHora(),
+          uptime: { type: 'number', description: 'Segundos desde el arranque del proceso' },
+          memoria: {
+            type: 'object',
+            description: 'process.memoryUsage() en bytes',
+            properties: {
+              rss: { type: 'integer' },
+              heapTotal: { type: 'integer' },
+              heapUsed: { type: 'integer' },
+              external: { type: 'integer' }
+            },
+            additionalProperties: true
+          }
+        }
+      },
+
+      // ------------------------------ empresas ------------------------------
       Empresa: {
         type: 'object',
+        description: 'Cuerpo para crear/actualizar una empresa',
         required: ['ruc', 'nombreFantasia', 'razonSocial'],
         properties: {
           ruc: {
@@ -1198,6 +2011,80 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         }
       },
 
+      EmpresaCompleta: {
+        allOf: [
+          ref('Empresa'),
+          {
+            type: 'object',
+            description: 'Como la devuelve la API (la contraseña del certificado nunca se incluye)',
+            properties: {
+              _id: objectId(),
+              usuarioId: objectId('Dueño de la empresa'),
+              activo: { type: 'boolean' },
+              certificado: {
+                type: 'object',
+                nullable: true,
+                properties: {
+                  nombreArchivo: { type: 'string', example: 'kingston-f1.p12' },
+                  fechaVencimiento: fechaHora(),
+                  fechaCarga: fechaHora(),
+                  activo: { type: 'boolean' }
+                }
+              },
+              certificadoEnFileSystem: {
+                type: 'boolean',
+                description: 'true si el archivo .p12 existe físicamente en el volumen'
+              },
+              createdAt: fechaHora(),
+              updatedAt: fechaHora()
+            }
+          }
+        ]
+      },
+
+      ValidacionCertificado: {
+        type: 'object',
+        properties: {
+          tieneCertificado: { type: 'boolean', description: 'Metadatos completos y vigente' },
+          certificadoActivo: { type: 'boolean' },
+          certificadoEnFileSystem: { type: 'boolean', description: 'El archivo .p12 existe en el volumen' },
+          fechaVencimiento: fechaHora(),
+          fechaCarga: fechaHora(),
+          nombreArchivo: { type: 'string', nullable: true },
+          infoAdicional: {
+            type: 'object',
+            nullable: true,
+            description: 'Detalle del archivo en disco (tamaño, ruta)',
+            additionalProperties: true
+          }
+        }
+      },
+
+      EstadisticasEmpresa: {
+        type: 'object',
+        properties: {
+          empresa: {
+            type: 'object',
+            properties: {
+              nombreFantasia: { type: 'string' },
+              ruc: { type: 'string' }
+            }
+          },
+          totalFacturas: { type: 'integer' },
+          facturasPorEstado: { type: 'array', items: ref('ConteoPorEstado') },
+          ultimaFactura: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              _id: objectId(),
+              fechaCreacion: fechaHora(),
+              correlativo: { type: 'string' }
+            }
+          }
+        }
+      },
+
+      // ------------------------------ solicitud de factura ------------------------------
       SolicitudFactura: {
         type: 'object',
         required: ['param', 'data'],
@@ -1208,7 +2095,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
             description: 'Datos del emisor y del timbrado',
             properties: {
               version: { type: 'integer', default: 150 },
-              ruc: { type: 'string', example: '80069563-1', description: 'RUC del emisor; debe existir como empresa activa' },
+              ruc: { type: 'string', example: '80069563-1', description: 'RUC del emisor; debe existir como empresa activa del alcance' },
               razonSocial: { type: 'string' },
               nombreFantasia: { type: 'string' },
               timbradoNumero: { type: 'string', example: '12558946' },

@@ -14,9 +14,11 @@ const Evento = require('../models/Evento');
 const Invoice = require('../models/Invoice');
 const eventoService = require('../services/eventoService');
 const { verificarToken, verificarPermiso } = require('../middleware/auth');
+const { cargarAlcance, filtroEmpresa, perteneceAlAlcance } = require('../middleware/alcance');
+const { evaluarPlazoCancelacion } = require('../utils/plazosSifen');
 
 // Todas las rutas requieren autenticación y, para API Keys, permiso de lectura
-router.use(verificarToken, verificarPermiso('facturas:leer'));
+router.use(verificarToken, verificarPermiso('facturas:leer'), cargarAlcance);
 
 /**
  * @route   POST /api/eventos/enviar
@@ -84,8 +86,8 @@ router.post('/enviar', verificarPermiso('facturas:crear'), async (req, res) => {
 
     // Verificar que la factura existe
     const invoice = await Invoice.findById(invoiceId);
-    
-    if (!invoice) {
+
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
       return res.status(404).json({
         success: false,
         error: 'EVENTO_FACTURA_NOT_FOUND',
@@ -95,14 +97,31 @@ router.post('/enviar', verificarPermiso('facturas:crear'), async (req, res) => {
 
     // Validaciones específicas por tipo de evento
     if (tipoEvento === 'cancelacion') {
-      // La cancelación solo puede hacerla el emisor y dentro de las 48hs
-      // Por ahora solo validamos que esté aprobada
+      // Solo el emisor, sobre un DTE aprobado, y dentro del plazo del
+      // Manual Técnico v150: 48h para facturas, 168h para el resto.
       if (invoice.estadoSifen !== 'aceptado') {
-      return res.status(400).json({
-        success: false,
-        error: 'EVENTO_CANCELACION_INVALIDA',
-        message: 'Solo se puede cancelar facturas aprobadas por SET'
-      });
+        return res.status(400).json({
+          success: false,
+          error: 'EVENTO_CANCELACION_INVALIDA',
+          message: 'Solo se puede cancelar facturas aprobadas por SET'
+        });
+      }
+
+      const plazo = evaluarPlazoCancelacion(
+        invoice.fechaProceso || invoice.updatedAt,
+        invoice.de
+      );
+
+      if (!plazo.dentro) {
+        return res.status(400).json({
+          success: false,
+          error: 'EVENTO_CANCELACION_FUERA_DE_PLAZO',
+          message: `El plazo de cancelación es de ${plazo.horasLimite} horas desde la aprobación ` +
+            `(pasaron ${Math.floor(plazo.horasTranscurridas)}). ` +
+            `Para anular esta factura corresponde emitir una Nota de Crédito.`,
+          horasLimite: plazo.horasLimite,
+          horasTranscurridas: Math.floor(plazo.horasTranscurridas)
+        });
       }
     }
 
@@ -143,6 +162,11 @@ router.get('/factura/:invoiceId', async (req, res) => {
   try {
     const { invoiceId } = req.params;
 
+    const invoice = await Invoice.findById(invoiceId).select('empresaId');
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
+      return res.status(404).json({ success: false, error: 'EVENTO_FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
+    }
+
     const eventos = await eventoService.obtenerEventos(invoiceId);
 
     res.status(200).json({
@@ -171,7 +195,8 @@ router.get('/cdc/:cdc', async (req, res) => {
   try {
     const { cdc } = req.params;
 
-    const eventos = await eventoService.obtenerEventosPorCDC(cdc);
+    const todos = await eventoService.obtenerEventosPorCDC(cdc);
+    const eventos = todos.filter((e) => perteneceAlAlcance(req, e.empresaId));
 
     res.status(200).json({
       success: true,
@@ -203,7 +228,7 @@ router.get('/:id', async (req, res) => {
       .populate('invoiceId', 'correlativo cdc estadoSifen')
       .populate('empresaId', 'ruc nombreFantasia');
 
-    if (!evento) {
+    if (!evento || !perteneceAlAlcance(req, evento.empresaId)) {
       return res.status(404).json({
         success: false,
         error: 'EVENTO_NOT_FOUND',
@@ -236,7 +261,7 @@ router.get('/', async (req, res) => {
   try {
     const { tipoEvento, estadoEvento, cdc, page = 1, limit = 10 } = req.query;
 
-    const filtro = {};
+    const filtro = { ...filtroEmpresa(req) };
     if (tipoEvento) filtro.tipoEvento = tipoEvento;
     if (estadoEvento) filtro.estadoEvento = estadoEvento;
     if (cdc) filtro.cdc = cdc;

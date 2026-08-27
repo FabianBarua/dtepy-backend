@@ -1,8 +1,21 @@
 const { crearFactura } = require('../services/facturaService');
 const { buscarEmpresaPorRUC } = require('../services/empresaService');
+const { perteneceAlAlcance } = require('../middleware/alcance');
 
 exports.crear = async (req, res) => {
   try {
+    // El emisor tiene que estar dentro del alcance del token: una API Key
+    // de un usuario no puede emitir a nombre de la empresa de otro.
+    const rucEmisor = req.body?.param?.ruc || req.body?.ruc;
+    const empresaEmisora = await buscarEmpresaPorRUC(String(rucEmisor || '').trim());
+    if (empresaEmisora && !perteneceAlAlcance(req, empresaEmisora._id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'EMPRESA_FUERA_DE_ALCANCE',
+        message: 'El RUC emisor no corresponde a una empresa de este usuario o API Key'
+      });
+    }
+
     const resultado = await crearFactura(req.body);
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     const facturaId = resultado.facturaId;
@@ -64,7 +77,7 @@ exports.obtenerEmpresa = async (req, res) => {
     }
 
     const empresa = await buscarEmpresaPorRUC(ruc);
-    if (!empresa) {
+    if (!empresa || !perteneceAlAlcance(req, empresa._id)) {
       return res.status(404).json({ success: false, error: 'EMPRESA_NOT_FOUND', message: `No se encontró una empresa con RUC ${ruc}` });
     }
 

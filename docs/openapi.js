@@ -109,6 +109,13 @@ Además hay operaciones **vedadas a las API Keys** sin importar sus permisos:
   \`DELETE /api/logs/clear\`, \`POST /api/queue/clear*\`): solo sesión JWT
   de un usuario **admin**.
 
+### Alcance multi-empresa
+
+Facturas, eventos, lotes y estadísticas se limitan a las **empresas del
+token**: un admin ve todo el sistema; los demás usuarios solo sus empresas;
+una API Key, las empresas de su dueño (o únicamente la empresa a la que esté
+asociada). Los documentos fuera del alcance responden \`404\`.
+
 ### Límites
 
 \`POST /api/auth/login\` admite 10 intentos fallidos por IP cada 15 minutos;
@@ -775,11 +782,9 @@ Manual Técnico SIFEN v150, sección 11.
 
 **Cancelación**: solo la puede pedir el emisor, sobre una factura ya aprobada
 por SET, y dentro de las **48 horas** de aprobada (168 horas para el resto de
-los documentos). Pasado ese plazo hay que emitir una Nota de Crédito.
-La cancelación es **irreversible**.
-
-Hoy el backend solo valida que la factura esté \`aceptado\`; el plazo lo aplica
-SET del otro lado y devuelve el rechazo.
+los documentos). El backend valida el plazo localmente y responde
+\`EVENTO_CANCELACION_FUERA_DE_PLAZO\` si venció; en ese caso corresponde
+emitir una Nota de Crédito. La cancelación es **irreversible**.
 `.trim(),
         requestBody: {
           required: true,

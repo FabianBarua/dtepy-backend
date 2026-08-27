@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const path = require('path');
 const { verificarToken, verificarPermiso } = require('../middleware/auth');
+const { cargarAlcance, empresaParaConsultas } = require('../middleware/alcance');
+const { resolverCertificadoEmpresa } = require('../services/certificadoService');
 
-router.use(verificarToken, verificarPermiso('facturas:leer'));
+router.use(verificarToken, verificarPermiso('facturas:leer'), cargarAlcance);
 
 router.get('/ruc/:ruc', async (req, res) => {
   try {
@@ -15,14 +16,24 @@ router.get('/ruc/:ruc', async (req, res) => {
       return;
     }
 
+    // La consulta a SET va firmada: se usa el certificado de una empresa
+    // del alcance (antes apuntaba a un path hardcodeado inexistente).
+    const empresa = await empresaParaConsultas(req);
+    if (!empresa) {
+      return res.status(400).json({
+        success: false,
+        error: 'CERTIFICADO_NO_DISPONIBLE',
+        message: 'Para consultar a SIFEN se necesita una empresa con certificado digital activo'
+      });
+    }
+
     try {
       const setApi = require('../services/setapi-wrapper');
       const idConsulta = crypto.randomBytes(16).toString('hex');
-      const ambiente = "test";
-      const certificateP12Path = path.join(__dirname, '..', 'certificados', 'p12', 'certificado.p12');
-      const certificatePassword = '123456';
+      const ambiente = empresa.configuracionSifen?.modo || 'test';
+      const cert = resolverCertificadoEmpresa(empresa);
 
-      const respuesta = await setApi.consultaRuc(idConsulta, ruc, ambiente, certificateP12Path, certificatePassword);
+      const respuesta = await setApi.consultaRuc(idConsulta, ruc, ambiente, cert.ruta, cert.contrasena);
 
       res.status(200).json({
         success: true,

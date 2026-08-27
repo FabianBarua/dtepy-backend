@@ -7,6 +7,8 @@ const mongoose = require('mongoose');
 const Invoice = require('../models/Invoice');
 const OperationLog = require('../models/OperationLog');
 const { verificarToken, verificarPermiso, requerirSesionAdmin } = require('../middleware/auth');
+const { cargarAlcance, filtroEmpresa, perteneceAlAlcance, empresaParaConsultas } = require('../middleware/alcance');
+const { resolverCertificadoEmpresa } = require('../services/certificadoService');
 const {
   extraerCodigoRetorno,
   extraerMensajeRetorno,
@@ -18,7 +20,7 @@ const {
 // Autenticación + permiso base: una API Key necesita al menos
 // 'facturas:leer' para tocar cualquier ruta de facturas (las sesiones
 // JWT pasan siempre). Las rutas de abajo suman permisos puntuales.
-router.use(verificarToken, verificarPermiso('facturas:leer'));
+router.use(verificarToken, verificarPermiso('facturas:leer'), cargarAlcance);
 
 // Obtener todas las facturas
 router.get('/', async (req, res) => {
@@ -59,6 +61,9 @@ router.get('/', async (req, res) => {
           break;
       }
     }
+
+    // Restringir a las empresas del alcance (admin ve todo)
+    Object.assign(query, filtroEmpresa(req));
 
     const invoices = await Invoice.find(query)
       .sort({ createdAt: -1 })
@@ -107,7 +112,7 @@ router.get('/cdc/:cdc', async (req, res) => {
       return;
     }
 
-    const invoiceRecord = await Invoice.findOne({ cdc });
+    const invoiceRecord = await Invoice.findOne({ cdc, ...filtroEmpresa(req) });
 
     if (invoiceRecord) {
       res.status(200).json({
@@ -136,11 +141,20 @@ router.get('/cdc/:cdc', async (req, res) => {
     try {
       const setApi = require('../services/setapi-wrapper');
       const idConsulta = crypto.randomBytes(16).toString('hex');
-      const ambiente = "test";
-      const certificateP12Path = path.join(__dirname, '..', 'certificados', 'p12', 'certificado.p12');
-      const certificatePassword = '123456';
 
-      const respuesta = await setApi.consulta(idConsulta, cdc, ambiente, certificateP12Path, certificatePassword);
+      // Consultar a SET requiere firmar con un certificado real
+      const empresa = await empresaParaConsultas(req);
+      if (!empresa) {
+        return res.status(400).json({
+          success: false,
+          error: 'CERTIFICADO_NO_DISPONIBLE',
+          message: 'Para consultar a SIFEN se necesita una empresa con certificado digital activo'
+        });
+      }
+      const ambiente = empresa.configuracionSifen?.modo || 'test';
+      const cert = resolverCertificadoEmpresa(empresa);
+
+      const respuesta = await setApi.consulta(idConsulta, cdc, ambiente, cert.ruta, cert.contrasena);
 
       res.status(200).json({
         success: true,
@@ -174,7 +188,7 @@ router.get('/estado/:cdc', async (req, res) => {
       return;
     }
 
-    const invoiceRecord = await Invoice.findOne({ cdc });
+    const invoiceRecord = await Invoice.findOne({ cdc, ...filtroEmpresa(req) });
 
     if (!invoiceRecord) {
       res.status(404).json({
@@ -201,19 +215,16 @@ router.get('/estado/:cdc', async (req, res) => {
       const idConsulta = crypto.randomBytes(16).toString('hex');
       const ambiente = empresa?.configuracionSifen?.modo || 'test';
 
-      let certificateP12Path = path.join(__dirname, '..', 'certificados', 'p12', 'certificado.p12');
-      let certificatePassword = '123456';
-
-      if (empresa?.certificado?.nombreArchivo) {
-        const certificadoService = require('../services/certificadoService');
-        certificateP12Path = path.join(__dirname, '..', 'certificados', 'p12', empresa.certificado.nombreArchivo);
-        certificatePassword = certificadoService.descifrarContrasena(empresa.certificado.contrasena);
-        console.log(`🔑 Usando certificado de la empresa: ${empresa.certificado.nombreArchivo}`);
-      } else {
-        console.log('⚠️ Empresa no tiene certificado configurado, usando certificado por defecto');
+      if (!empresa) {
+        return res.status(400).json({
+          success: false,
+          error: 'EMPRESA_NOT_FOUND',
+          message: 'La factura no tiene una empresa asociada con la cual consultar a SET'
+        });
       }
+      const cert = resolverCertificadoEmpresa(empresa);
 
-      const respuesta = await setApi.consulta(idConsulta, cdc, ambiente, certificateP12Path, certificatePassword);
+      const respuesta = await setApi.consulta(idConsulta, cdc, ambiente, cert.ruta, cert.contrasena);
 
       const codigoRetornoMatch =
         respuesta.match(/<ns2:dCodRes>(.*?)<\/ns2:dCodRes>/) ||
@@ -379,7 +390,7 @@ router.get('/:id', async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
 
-    if (!invoice) {
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
       return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
     }
 
@@ -436,6 +447,11 @@ router.get('/:id', async (req, res) => {
 // Obtener logs de una factura
 router.get('/:id/logs', async (req, res) => {
   try {
+    const invoice = await Invoice.findById(req.params.id).select('empresaId');
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
+      return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
+    }
+
     const logs = await OperationLog.find({ invoiceId: req.params.id })
       .sort({ createdAt: -1 });
 
@@ -449,6 +465,11 @@ router.get('/:id/logs', async (req, res) => {
 // Obtener eventos de una factura
 router.get('/:id/eventos', async (req, res) => {
   try {
+    const invoice = await Invoice.findById(req.params.id).select('empresaId');
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
+      return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
+    }
+
     const Evento = require('../models/Evento');
     const eventos = await Evento.find({ invoiceId: req.params.id })
       .sort({ createdAt: -1 });
@@ -474,7 +495,7 @@ router.post('/:id/retry', verificarPermiso('facturas:crear'), async (req, res) =
   try {
     const invoice = await Invoice.findById(req.params.id);
 
-    if (!invoice) {
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
       return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
     }
 
@@ -647,7 +668,7 @@ router.post('/:id/refresh-status', verificarPermiso('facturas:crear'), async (re
 
     const invoiceRecord = await Invoice.findById(id);
 
-    if (!invoiceRecord) {
+    if (!invoiceRecord || !perteneceAlAlcance(req, invoiceRecord.empresaId)) {
       console.log(`❌ Factura no encontrada: ${id}`);
       return res.status(404).json({
         success: false,
@@ -969,7 +990,7 @@ router.get('/:id/download-xml', async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
 
-    if (!invoice) {
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
       return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
     }
 
@@ -1019,7 +1040,7 @@ router.get('/:id/download-pdf', async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
 
-    if (!invoice) {
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
       return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
     }
 
@@ -1075,6 +1096,9 @@ router.delete('/:id', verificarPermiso('facturas:eliminar'), async (req, res) =>
     const { id } = req.params;
 
     const invoice = await Invoice.findById(id).populate('grupoLoteId', 'descripcion');
+    if (invoice && !perteneceAlAlcance(req, invoice.empresaId)) {
+      return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
+    }
 
     if (!invoice) {
       return res.status(404).json({

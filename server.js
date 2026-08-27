@@ -85,6 +85,25 @@ app.delete('/api/api-keys/:id', verificarToken, apiKeyController.revocarApiKey);
 
 
 // ========================================
+// DOCUMENTACION DE LA API (publica, sin auth)
+// ========================================
+// Swagger UI interactivo en /api/docs y el JSON crudo en /api/openapi.json
+// (util para generar clientes o importarlo en Postman/Insomnia).
+const swaggerUi = require('swagger-ui-express');
+const openapi = require('./docs/openapi');
+
+app.get('/api/openapi.json', (req, res) => res.json(openapi));
+
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapi, {
+  customSiteTitle: 'DTE-PY API',
+  swaggerOptions: {
+    persistAuthorization: true,  // el token sobrevive al refresco de la pagina
+    docExpansion: 'none',
+    tagsSorter: 'alpha'
+  }
+}));
+
+// ========================================
 // HEALTH CHECK (publico, sin auth)
 // ========================================
 // Lo usa el frontend para validar la URL del backend antes de iniciar sesion.
@@ -130,6 +149,7 @@ const iniciarServidor = async () => {
     console.log(`   CORS permitido para: ${origenesPermitidos.join(', ')}`);
     console.log(`📋 Endpoints disponibles:`);
     console.log(`   GET  /api/health - Estado del servicio (público)`);
+    console.log(`   GET  /api/docs - Documentación interactiva de la API`);
     console.log(`   POST /api/facturar/crear - Genera factura electrónica (con cola asíncrona)`);
     console.log(`   GET  /api/stats - Estadísticas del sistema`);
     console.log(`   GET  /api/invoices - Lista de facturas`);

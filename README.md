@@ -82,6 +82,29 @@ npm start
 npm run worker
 ```
 
+## 📖 Documentación de la API
+
+La API está documentada con **OpenAPI 3.0**. Con el servidor levantado:
+
+| Recurso | URL |
+|---|---|
+| Swagger UI (interactivo) | `http://localhost:8081/api/docs` |
+| Especificación en JSON | `http://localhost:8081/api/openapi.json` |
+
+Ambos son públicos y no requieren autenticación. Cubren los 57 endpoints:
+facturación, facturas, empresas y certificados, eventos SIFEN, lotes, cola,
+API Keys, logs y estadísticas.
+
+Desde Swagger UI se pueden probar los endpoints directamente: usá el botón
+**Authorize** con un JWT (de `/api/auth/login`) o una API Key. El token queda
+guardado entre recargas.
+
+El JSON se puede importar en Postman o Insomnia, o usarse para generar un
+cliente con `openapi-generator`.
+
+> La especificación vive en [`docs/openapi.js`](docs/openapi.js) y está escrita
+> a mano. Al agregar o cambiar un endpoint, actualizala también.
+
 ## 📡 Endpoints Principales
 
 ### Enviar Factura (Asíncrono)

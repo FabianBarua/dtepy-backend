@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const path = require('path');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, verificarPermiso } = require('../middleware/auth');
 
-router.use(verificarToken);
+router.use(verificarToken, verificarPermiso('facturas:leer'));
 
 router.get('/ruc/:ruc', async (req, res) => {
   try {

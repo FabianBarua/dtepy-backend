@@ -8,9 +8,20 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { sanitizarMongo } = require('./middleware/sanitizarMongo');
 
 // Configurar Express
 const app = express();
+
+// Detrás de un reverse proxy (Traefik/nginx): necesario para que req.ip sea
+// la IP real del cliente y no la del proxy (el rate limit depende de esto).
+app.set('trust proxy', 1);
+
+// Cabeceras de seguridad. El CSP se desactiva porque rompería Swagger UI
+// (/api/docs); el resto de las protecciones de helmet quedan activas.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // ========================================
 // CORS
@@ -37,12 +48,31 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Eliminar operadores de MongoDB ($ne, $where, ...) de body/query/params
+app.use(sanitizarMongo);
+
+// ========================================
+// RATE LIMIT DEL LOGIN (anti fuerza bruta)
+// ========================================
+// 10 intentos por IP cada 15 minutos. Los logins exitosos no cuentan.
+const limiteLogin = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Demasiados intentos de inicio de sesión. Probá de nuevo en unos minutos.'
+  }
+});
+
 // Importar rutas
 const statsRoutes = require('./routes/stats');
 const invoiceRoutes = require('./routes/invoices');
 const authController = require('./controllers/authController');
 const apiKeyController = require('./controllers/apiKeyController');
-const { verificarToken, verificarAdmin } = require('./middleware/auth');
+const { verificarToken, verificarAdmin, requerirSesionUsuario } = require('./middleware/auth');
 
 // Rutas de empresas y facturación
 const empresaRoutes = require('./routes/empresas');
@@ -69,19 +99,20 @@ app.use('/api/consulta', consultaRoutes);
 app.use('/api/logs', logsRoutes);
 
 // Rutas de autenticación (públicas)
-app.post('/api/auth/login', authController.login);
-// Rutas de autenticación (protegidas)
-app.get('/api/auth/perfil', verificarToken, authController.getPerfil);
-app.put('/api/auth/perfil', verificarToken, authController.actualizarPerfil);
-app.post('/api/auth/cambiar-password', verificarToken, authController.cambiarPassword);
-app.post('/api/auth/logout', verificarToken, authController.logout);
+app.post('/api/auth/login', limiteLogin, authController.login);
+// Rutas de autenticación (solo sesión JWT: una API Key no gestiona el perfil)
+app.get('/api/auth/perfil', verificarToken, requerirSesionUsuario, authController.getPerfil);
+app.put('/api/auth/perfil', verificarToken, requerirSesionUsuario, authController.actualizarPerfil);
+app.post('/api/auth/cambiar-password', verificarToken, requerirSesionUsuario, authController.cambiarPassword);
+app.post('/api/auth/logout', verificarToken, requerirSesionUsuario, authController.logout);
 
-// Rutas de API Keys (protegidas, solo admin)
-app.post('/api/api-keys', verificarToken, apiKeyController.crearApiKey);
-app.get('/api/api-keys', verificarToken, apiKeyController.listarApiKeys);
-app.get('/api/api-keys/:id', verificarToken, apiKeyController.obtenerApiKey);
-app.put('/api/api-keys/:id/renew', verificarToken, apiKeyController.renovarApiKey);
-app.delete('/api/api-keys/:id', verificarToken, apiKeyController.revocarApiKey);
+// Rutas de API Keys (solo sesión JWT: una API Key filtrada no debe poder
+// crear ni renovar credenciales — eso sería escalación de privilegios)
+app.post('/api/api-keys', verificarToken, requerirSesionUsuario, apiKeyController.crearApiKey);
+app.get('/api/api-keys', verificarToken, requerirSesionUsuario, apiKeyController.listarApiKeys);
+app.get('/api/api-keys/:id', verificarToken, requerirSesionUsuario, apiKeyController.obtenerApiKey);
+app.put('/api/api-keys/:id/renew', verificarToken, requerirSesionUsuario, apiKeyController.renovarApiKey);
+app.delete('/api/api-keys/:id', verificarToken, requerirSesionUsuario, apiKeyController.revocarApiKey);
 
 
 // ========================================

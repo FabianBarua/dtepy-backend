@@ -85,10 +85,34 @@ Todos los endpoints requieren autenticación salvo \`/api/health\` y
   defina expiración. Es lo que usan las integraciones (ERPNext y similares).
 
 El middleware intenta primero validar el valor como JWT; si no lo es, lo busca
-como API Key. Las operaciones destructivas masivas
-(\`DELETE /api/invoices/clear\` y \`DELETE /api/logs/clear\`) exigen
-específicamente una **sesión JWT de un usuario admin**: una API Key no alcanza,
-aunque su dueño sea admin.
+como API Key.
+
+### Permisos de las API Keys
+
+Una sesión JWT opera con el rol del usuario. Una API Key, en cambio, solo
+alcanza lo que declaran sus \`permisos\`:
+
+| Permiso | Habilita |
+|---|---|
+| \`facturas:crear\` | Emitir documentos, reintentos, eventos, envío de lotes |
+| \`facturas:leer\` | Consultas, descargas, estado, empresas (lectura) |
+| \`facturas:eliminar\` | Borrar facturas y lotes individuales |
+| \`stats:leer\` | Estadísticas, logs y estado de la cola |
+| \`admin\` | Todos los anteriores |
+
+Además hay operaciones **vedadas a las API Keys** sin importar sus permisos:
+
+- Gestión de credenciales (\`/api/api-keys/*\`, perfil, contraseña): solo
+  sesión JWT. Una key filtrada no puede crear ni renovar credenciales.
+- Mutaciones de empresas y subida de certificados: solo sesión JWT.
+- Destructivas masivas (\`DELETE /api/invoices/clear\`,
+  \`DELETE /api/logs/clear\`, \`POST /api/queue/clear*\`): solo sesión JWT
+  de un usuario **admin**.
+
+### Límites
+
+\`POST /api/auth/login\` admite 10 intentos fallidos por IP cada 15 minutos;
+después responde \`429\`.
 
 ## Flujo típico de emisión
 
@@ -278,7 +302,7 @@ workers asíncronos sobre Redis, no en el request.
       get: {
         tags: ['API Keys'],
         summary: 'Listar API Keys',
-        description: 'Devuelve solo `keyParcial` (prefijo y sufijo). La clave completa no se guarda en la base y no se puede recuperar.',
+        description: 'Solo con sesión JWT (no con API Key). Devuelve solo `keyParcial` (prefijo y sufijo): la clave completa no se guarda en la base y no se puede recuperar.',
         responses: { 200: okJson('Listado'), 401: NO_AUTORIZADO }
       },
       post: {
@@ -640,7 +664,7 @@ empresa cargada y activa, con certificado válido.
       post: {
         tags: ['Empresas'],
         summary: 'Crear una empresa',
-        description: 'El certificado digital se sube aparte, con `POST /api/empresas/{id}/certificado`.',
+        description: 'Solo con sesión JWT (las mutaciones de empresas no se permiten con API Key). El certificado digital se sube aparte, con `POST /api/empresas/{id}/certificado`.',
         requestBody: {
           required: true,
           content: {
@@ -961,7 +985,7 @@ SET del otro lado y devuelve el rechazo.
       post: {
         tags: ['Cola'],
         summary: 'Vaciar la cola por completo',
-        description: '⚠️ Elimina todos los trabajos, incluidos los pendientes de procesar.',
+        description: '⚠️ Elimina todos los trabajos, incluidos los pendientes de procesar. Requiere sesión JWT de admin.',
         requestBody: {
           content: {
             'application/json': {

@@ -3,9 +3,9 @@ const router = express.Router();
 const LoteEnvio = require('../models/LoteEnvio');
 const Invoice = require('../models/Invoice');
 const envioLoteService = require('../services/envioLoteService');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, verificarPermiso } = require('../middleware/auth');
 
-router.use(verificarToken);
+router.use(verificarToken, verificarPermiso('facturas:leer'));
 
 router.get('/list', async (req, res) => {
   try {
@@ -58,7 +58,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-router.post('/enviar/:id', async (req, res) => {
+router.post('/enviar/:id', verificarPermiso('facturas:crear'), async (req, res) => {
   try {
     const lote = await envioLoteService.enviarLote(req.params.id);
     res.json({ success: true, data: lote, message: 'Lote enviado a SIFEN' });
@@ -69,7 +69,7 @@ router.post('/enviar/:id', async (req, res) => {
   }
 });
 
-router.post('/enviar-pendientes', async (req, res) => {
+router.post('/enviar-pendientes', verificarPermiso('facturas:crear'), async (req, res) => {
   try {
     const resultados = await envioLoteService.enviarPendientes();
     res.json({ success: true, data: resultados });
@@ -80,7 +80,7 @@ router.post('/enviar-pendientes', async (req, res) => {
   }
 });
 
-router.post('/consultar/:id', async (req, res) => {
+router.post('/consultar/:id', verificarPermiso('facturas:crear'), async (req, res) => {
   try {
     const resultado = await envioLoteService.consultarResultadoLote(req.params.id);
     res.json({ success: true, data: resultado });
@@ -91,7 +91,7 @@ router.post('/consultar/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verificarPermiso('facturas:eliminar'), async (req, res) => {
   try {
     const { id } = req.params;
 

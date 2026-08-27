@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Invoice = require('../models/Invoice');
 const OperationLog = require('../models/OperationLog');
-const { verificarToken, requerirSesionAdmin } = require('../middleware/auth');
+const { verificarToken, verificarPermiso, requerirSesionAdmin } = require('../middleware/auth');
 const {
   extraerCodigoRetorno,
   extraerMensajeRetorno,
@@ -15,7 +15,10 @@ const {
 } = require('../utils/estadoSifen');
 
 // Todas las rutas requieren autenticación
-router.use(verificarToken);
+// Autenticación + permiso base: una API Key necesita al menos
+// 'facturas:leer' para tocar cualquier ruta de facturas (las sesiones
+// JWT pasan siempre). Las rutas de abajo suman permisos puntuales.
+router.use(verificarToken, verificarPermiso('facturas:leer'));
 
 // Obtener todas las facturas
 router.get('/', async (req, res) => {
@@ -31,7 +34,9 @@ router.get('/', async (req, res) => {
     }
 
     if (search) {
-      const searchRegex = new RegExp(search, 'i');
+      // Escapar metacaracteres: el texto del usuario se busca literal
+      // (sin esto, un patrón hostil permite ReDoS)
+      const searchRegex = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       switch (searchType) {
         case 'ruc':
           query['cliente.ruc'] = searchRegex;
@@ -465,7 +470,7 @@ router.get('/:id/eventos', async (req, res) => {
 });
 
 // Reintentar envío de factura
-router.post('/:id/retry', async (req, res) => {
+router.post('/:id/retry', verificarPermiso('facturas:crear'), async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id);
 
@@ -634,7 +639,7 @@ router.post('/:id/retry', async (req, res) => {
 });
 
 // Refrescar estado desde SET
-router.post('/:id/refresh-status', async (req, res) => {
+router.post('/:id/refresh-status', verificarPermiso('facturas:crear'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1065,7 +1070,7 @@ router.get('/:id/download-pdf', async (req, res) => {
 });
 
 // Eliminar una factura específica por ID
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', verificarPermiso('facturas:eliminar'), async (req, res) => {
   try {
     const { id } = req.params;
 

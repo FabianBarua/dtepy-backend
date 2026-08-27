@@ -13,10 +13,10 @@ const router = express.Router();
 const Evento = require('../models/Evento');
 const Invoice = require('../models/Invoice');
 const eventoService = require('../services/eventoService');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, verificarPermiso } = require('../middleware/auth');
 
-// Todas las rutas requieren autenticación
-router.use(verificarToken);
+// Todas las rutas requieren autenticación y, para API Keys, permiso de lectura
+router.use(verificarToken, verificarPermiso('facturas:leer'));
 
 /**
  * @route   POST /api/eventos/enviar
@@ -34,7 +34,7 @@ router.use(verificarToken);
  *   }
  * }
  */
-router.post('/enviar', async (req, res) => {
+router.post('/enviar', verificarPermiso('facturas:crear'), async (req, res) => {
   try {
     const { invoiceId, tipoEvento, descripcion, usuario } = req.body;
 

@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const Invoice = require('../models/Invoice');
-const { verificarToken } = require('../middleware/auth');
+const { verificarToken, verificarPermiso } = require('../middleware/auth');
 
-router.use(verificarToken);
+router.use(verificarToken, verificarPermiso('facturas:leer'));
 
 router.get('/estado/:id', async (req, res) => {
   try {

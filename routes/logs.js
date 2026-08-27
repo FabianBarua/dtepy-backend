@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const OperationLog = require('../models/OperationLog');
-const { verificarToken, requerirSesionAdmin } = require('../middleware/auth');
+const { verificarToken, verificarPermiso, requerirSesionAdmin } = require('../middleware/auth');
 
-router.use(verificarToken);
+router.use(verificarToken, verificarPermiso('stats:leer'));
 
 router.get('/', async (req, res) => {
   try {

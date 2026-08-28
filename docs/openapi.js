@@ -1814,16 +1814,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         properties: {
           _id: objectId(),
           invoiceId: {
-            type: 'object',
             nullable: true,
-            description: 'Factura relacionada (populada), o null en operaciones globales',
-            properties: {
-              _id: objectId(),
-              correlativo: { type: 'string' },
-              cdc: { type: 'string', nullable: true },
-              estadoSifen: ref('EstadoSifen')
-            }
+            description: 'Factura relacionada. En /api/logs y /api/invoices/logs viene populada como objeto {_id, correlativo, cdc, estadoSifen}; en /api/invoices/{id}/logs viene como string (el ObjectId pelado); null en operaciones globales'
           },
+          createdAt: fechaHora(),
+          updatedAt: fechaHora(),
           tipoOperacion: ref('TipoOperacion'),
           descripcion: { type: 'string', example: 'XML firmado exitosamente' },
           estado: { type: 'string', enum: ['success', 'error', 'warning'] },

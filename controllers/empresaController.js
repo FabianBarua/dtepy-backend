@@ -11,6 +11,65 @@ const Evento = require('../models/Evento');
 const ApiKey = require('../models/ApiKey');
 
 /**
+ * Normaliza los códigos de establecimiento a 3 dígitos ('1' -> '001').
+ */
+function normalizarEstablecimientos(establecimientos) {
+  if (!Array.isArray(establecimientos)) return establecimientos;
+  return establecimientos.map((est) => ({
+    ...est,
+    codigo: String(est.codigo || '').padStart(3, '0')
+  }));
+}
+
+/**
+ * Valida los datos de emisor configurables de la empresa. Devuelve el
+ * mensaje de error o null si todo está bien.
+ */
+function validarDatosEmisor({ configuracionSifen, actividadesEconomicas, establecimientos }) {
+  if (configuracionSifen) {
+    for (const campo of ['establecimiento', 'puntoExpedicion']) {
+      if (configuracionSifen[campo] === '' || configuracionSifen[campo] === null) {
+        delete configuracionSifen[campo];   // vacío = mantener el actual
+      } else if (configuracionSifen[campo] !== undefined) {
+        if (!/^\d{1,3}$/.test(String(configuracionSifen[campo]))) {
+          return `${campo} inválido: debe ser numérico de 1 a 3 dígitos (ej. "001")`;
+        }
+        configuracionSifen[campo] = String(configuracionSifen[campo]).padStart(3, '0');
+      }
+    }
+    if (configuracionSifen.timbradoFecha === '' || configuracionSifen.timbradoFecha === null) {
+      delete configuracionSifen.timbradoFecha;  // el match de mongoose no acepta ''
+    } else if (configuracionSifen.timbradoFecha && !/^\d{4}-\d{2}-\d{2}$/.test(configuracionSifen.timbradoFecha)) {
+      return 'timbradoFecha inválida: formato YYYY-MM-DD (fecha de inicio de vigencia del timbrado)';
+    }
+  }
+  if (actividadesEconomicas !== undefined && actividadesEconomicas !== null) {
+    if (!Array.isArray(actividadesEconomicas)) {
+      return 'actividadesEconomicas debe ser un array de { codigo, descripcion }';
+    }
+    for (const act of actividadesEconomicas) {
+      if (!act?.codigo || !act?.descripcion) {
+        return 'Cada actividad económica necesita codigo y descripcion';
+      }
+    }
+  }
+  if (establecimientos !== undefined && establecimientos !== null) {
+    if (!Array.isArray(establecimientos)) {
+      return 'establecimientos debe ser un array';
+    }
+    for (const est of establecimientos) {
+      if (!est?.codigo || !/^\d{1,3}$/.test(String(est.codigo))) {
+        return 'Cada establecimiento necesita un codigo numérico de 1 a 3 dígitos';
+      }
+      if (!est?.denominacion) {
+        return `El establecimiento ${est.codigo} necesita denominacion (nombre de la sucursal)`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Listar todas las empresas del usuario autenticado
  * GET /api/empresas
  */
@@ -94,6 +153,10 @@ exports.crear = async (req, res) => {
       nombreFantasia,
       razonSocial,
       configuracionSifen,
+      tipoContribuyente,
+      tipoRegimen,
+      actividadesEconomicas,
+      establecimientos,
       direccion,
       telefono,
       email
@@ -105,6 +168,11 @@ exports.crear = async (req, res) => {
         success: false,
         error: 'RUC, nombre de fantasía y razón social son requeridos'
       });
+    }
+
+    const errorEmisor = validarDatosEmisor({ configuracionSifen, actividadesEconomicas, establecimientos });
+    if (errorEmisor) {
+      return res.status(400).json({ success: false, error: errorEmisor });
     }
 
     // Limpiar RUC (eliminar guiones y otros caracteres no numéricos)
@@ -125,6 +193,10 @@ exports.crear = async (req, res) => {
       nombreFantasia,
       razonSocial,
       configuracionSifen,
+      tipoContribuyente,
+      tipoRegimen,
+      actividadesEconomicas,
+      establecimientos: normalizarEstablecimientos(establecimientos),
       direccion,
       telefono,
       email,
@@ -163,11 +235,20 @@ exports.actualizar = async (req, res) => {
       nombreFantasia,
       razonSocial,
       configuracionSifen,
+      tipoContribuyente,
+      tipoRegimen,
+      actividadesEconomicas,
+      establecimientos,
       direccion,
       telefono,
       email,
       activo
     } = req.body;
+
+    const errorEmisor = validarDatosEmisor({ configuracionSifen, actividadesEconomicas, establecimientos });
+    if (errorEmisor) {
+      return res.status(400).json({ success: false, error: errorEmisor });
+    }
 
     const empresa = await Empresa.findOne({
       _id: id,
@@ -260,6 +341,10 @@ exports.actualizar = async (req, res) => {
         ...configuracionSifen
       };
     }
+    if (tipoContribuyente !== undefined) empresa.tipoContribuyente = tipoContribuyente;
+    if (tipoRegimen !== undefined) empresa.tipoRegimen = tipoRegimen || undefined;
+    if (actividadesEconomicas !== undefined) empresa.actividadesEconomicas = actividadesEconomicas;
+    if (establecimientos !== undefined) empresa.establecimientos = normalizarEstablecimientos(establecimientos);
     if (direccion !== undefined) empresa.direccion = direccion;
     if (telefono !== undefined) empresa.telefono = telefono;
     if (email !== undefined) empresa.email = email;

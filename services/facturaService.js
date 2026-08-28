@@ -130,6 +130,12 @@ async function crearFactura(datosFactura) {
   validarEmpresaActiva(empresa);
   validarCertificadoValido(empresa);
 
+  // Establecimiento y punto de expedición: si el payload no los trae, se usan
+  // los configurados por defecto en la empresa. Debe resolverse ANTES de la
+  // numeración (la secuencia es por establecimiento+punto).
+  if (!data.establecimiento) data.establecimiento = empresa.configuracionSifen?.establecimiento || '001';
+  if (!data.punto) data.punto = empresa.configuracionSifen?.puntoExpedicion || '001';
+
   // Numeración: si la integración no manda data.numero, el sistema asigna el
   // siguiente correlativo. Debe ocurrir ANTES de construir hash/correlativo
   // (y de encolar) porque el número forma parte del CDC del documento.

@@ -171,6 +171,7 @@ workers asíncronos sobre Redis, no en el request.
     { name: 'Eventos SIFEN', description: 'Cancelación, conformidad, disconformidad' },
     { name: 'Lotes', description: 'Envío agrupado de documentos' },
     { name: 'Cola', description: 'Estado y mantenimiento de la cola de trabajos' },
+    { name: 'Cotizaciones', description: 'Cotizaciones de moneda extranjera declaradas (Gs por unidad)' },
     { name: 'Logs', description: 'Auditoría de operaciones' },
     { name: 'Estadísticas', description: 'Métricas del sistema' },
     { name: 'Consultas SET', description: 'Consultas directas a la SET' }
@@ -2175,6 +2176,60 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
                 enum: ['normal', 'lotes'],
                 default: 'normal',
                 description: '`normal` envía cada documento por separado; `lotes` los agrupa'
+              },
+              timbradoFecha: {
+                type: 'string',
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+                example: '2026-02-11',
+                description: 'Fecha de inicio de vigencia del timbrado (dFeIniT). Si falta, se usa la del payload o la fecha de emisión.'
+              },
+              establecimiento: {
+                type: 'string',
+                maxLength: 3,
+                default: '001',
+                description: 'Establecimiento POR DEFECTO para emitir cuando la factura no trae data.establecimiento'
+              },
+              puntoExpedicion: {
+                type: 'string',
+                maxLength: 3,
+                default: '001',
+                description: 'Punto de expedición POR DEFECTO para emitir cuando la factura no trae data.punto. Cada punto lleva numeración correlativa propia.'
+              }
+            }
+          },
+          tipoContribuyente: { type: 'integer', enum: [1, 2], description: '1 = persona física, 2 = persona jurídica. Fallback de param.tipoContribuyente.' },
+          tipoRegimen: { type: 'integer', minimum: 1, maximum: 8, description: '1 = Régimen de Turismo, 2 = Importador, 3 = Exportador, 4 = Maquila, 5 = Ley 60/90, 6 = Pequeño Productor, 7 = Mediano Productor, 8 = Régimen Contable. Fallback de param.tipoRegimen.' },
+          actividadesEconomicas: {
+            type: 'array',
+            description: 'Actividades económicas del RUC. Fallback de param.actividadesEconomicas.',
+            items: {
+              type: 'object',
+              required: ['codigo', 'descripcion'],
+              properties: {
+                codigo: { type: 'string', example: '46520' },
+                descripcion: { type: 'string', example: 'COMERCIO AL POR MAYOR DE EQUIPOS ELECTRÓNICOS' }
+              }
+            }
+          },
+          establecimientos: {
+            type: 'array',
+            description: 'Sucursales habilitadas con el timbrado. Fallback de param.establecimientos: con esto cargado, las integraciones pueden emitir mandando solo cliente + items.',
+            items: {
+              type: 'object',
+              required: ['codigo', 'denominacion'],
+              properties: {
+                codigo: { type: 'string', example: '001' },
+                denominacion: { type: 'string', example: 'Casa Matriz' },
+                direccion: { type: 'string', example: 'AVDA. ADRIAN JARA Y ABAY' },
+                numeroCasa: { type: 'string', example: '1104' },
+                departamento: { type: 'integer', example: 11 },
+                departamentoDescripcion: { type: 'string', example: 'ALTO PARANA' },
+                distrito: { type: 'integer', example: 145 },
+                distritoDescripcion: { type: 'string', example: 'CIUDAD DEL ESTE' },
+                ciudad: { type: 'integer', example: 3428 },
+                ciudadDescripcion: { type: 'string', example: 'CIUDAD DEL ESTE(PLANTA URBANA)' },
+                telefono: { type: 'string', example: '061505666' },
+                email: { type: 'string', example: 'hello@kingstonimports.com' }
               }
             }
           }
@@ -2262,7 +2317,7 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
         properties: {
           param: {
             type: 'object',
-            description: 'Datos del emisor y del timbrado',
+            description: 'Datos del emisor y del timbrado. TODO salvo `ruc` es opcional si la empresa tiene cargados sus datos de emisor (establecimientos, actividadesEconomicas, tipoContribuyente, tipoRegimen, timbrado y timbradoFecha en su configuración): lo que falte acá se completa desde la empresa. También data.establecimiento/data.punto caen a los defaults de la empresa, y data.numero a la numeración correlativa automática — una integración mínima manda param.ruc + data.cliente + data.items.',
             properties: {
               version: { type: 'integer', default: 150 },
               ruc: { type: 'string', example: '80069563-1', description: 'RUC del emisor; debe existir como empresa activa del alcance' },

@@ -30,9 +30,41 @@ const empresaSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  
+
+  // Datos del emisor para el DTE. Si están cargados, las integraciones pueden
+  // omitir param.establecimientos / param.actividadesEconomicas / etc. en cada
+  // factura: procesarFacturaService los toma de acá como fallback.
+  tipoContribuyente: {
+    type: Number,
+    enum: [1, 2]              // 1 = persona física, 2 = persona jurídica
+  },
+  tipoRegimen: {
+    type: Number,
+    min: 1,
+    max: 8                    // 1 = Régimen de Turismo ... 8 = Régimen Contable
+  },
+  actividadesEconomicas: [{
+    _id: false,
+    codigo: { type: String, required: true, trim: true },
+    descripcion: { type: String, required: true, trim: true }
+  }],
+  establecimientos: [{
+    _id: false,
+    codigo: { type: String, required: true, trim: true },        // '001'
+    denominacion: { type: String, required: true, trim: true },
+    direccion: { type: String, trim: true },
+    numeroCasa: { type: String, trim: true },
+    departamento: Number,
+    departamentoDescripcion: String,
+    distrito: Number,
+    distritoDescripcion: String,
+    ciudad: Number,
+    ciudadDescripcion: String,
+    telefono: String,
+    email: String
+  }],
+
   // Configuración SIFEN v150 (datos específicos de cada empresa)
-  // NOTA: Establecimiento y Punto de Emisión se generan automáticamente según SIFEN v150
   configuracionSifen: {
     // Timbrado proporcionado por SET
     timbrado: {
@@ -40,6 +72,25 @@ const empresaSchema = new mongoose.Schema({
       required: true,
       default: '12345678',
       maxlength: 8
+    },
+    // Fecha de inicio de vigencia del timbrado (YYYY-MM-DD): va en el DTE
+    // como dFeIniT. Si falta, se usa la del payload.
+    timbradoFecha: {
+      type: String,
+      match: /^\d{4}-\d{2}-\d{2}$/
+    },
+    // Establecimiento y punto de expedición POR DEFECTO para la emisión:
+    // se usan cuando la factura no trae data.establecimiento / data.punto.
+    // Cada punto lleva su propia numeración correlativa independiente.
+    establecimiento: {
+      type: String,
+      default: '001',
+      maxlength: 3
+    },
+    puntoExpedicion: {
+      type: String,
+      default: '001',
+      maxlength: 3
     },
     // CSC - Código Secreto del Contribuyente (proporcionado por SET)
     idCSC: {

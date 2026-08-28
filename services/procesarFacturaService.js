@@ -97,26 +97,39 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     const param = datosFactura.param || {};
     const timbrado = param.timbradoNumero || datosCompletos.timbrado || empresa.configuracionSifen.timbrado;
 
-    // Calcular fecha de timbrado (usar la del param o la de la factura)
-    let timbradoFecha;  // Por defecto
+    // Fecha de inicio de vigencia del timbrado (dFeIniT): payload > empresa >
+    // fecha de la factura como último recurso.
+    let timbradoFecha;
     if (param.timbradoFecha) {
       timbradoFecha = param.timbradoFecha;
+    } else if (empresa.configuracionSifen?.timbradoFecha) {
+      timbradoFecha = empresa.configuracionSifen.timbradoFecha;
     } else if (datosCompletos.fecha) {
       // Extraer solo la fecha (YYYY-MM-DD) sin hora ni microsegundos
       timbradoFecha = datosCompletos.fecha.split('T')[0];
     }
+
+    // Datos del emisor: lo que el payload no trae sale de la configuración de
+    // la empresa (establecimientos, actividades, tipo de contribuyente, etc.),
+    // así las integraciones pueden mandar solo cliente + items.
+    const establecimientosEmpresa = empresa.establecimientos?.length
+      ? empresa.establecimientos.map((e) => (e.toObject ? e.toObject() : e))
+      : undefined;
+    const actividadesEmpresa = empresa.actividadesEconomicas?.length
+      ? empresa.actividadesEconomicas.map((a) => (a.toObject ? a.toObject() : a))
+      : undefined;
 
     const params = {
       version: param.version || 150,
       ruc: param.ruc || empresa.ruc,
       razonSocial: param.razonSocial || empresa.razonSocial || param.nombreFantasia,
       nombreFantasia: param.nombreFantasia || empresa.nombreFantasia,
-      actividadesEconomicas: param.actividadesEconomicas,
+      actividadesEconomicas: param.actividadesEconomicas || actividadesEmpresa,
       timbradoNumero: timbrado,
       timbradoFecha: timbradoFecha,
-      tipoContribuyente: param.tipoContribuyente,
-      tipoRegimen: param.tipoRegimen,
-      establecimientos: param.establecimientos
+      tipoContribuyente: param.tipoContribuyente ?? empresa.tipoContribuyente,
+      tipoRegimen: param.tipoRegimen ?? empresa.tipoRegimen,
+      establecimientos: param.establecimientos || establecimientosEmpresa
     };
 
     await reportarProgreso(25);

@@ -213,33 +213,24 @@ async function enviarEvento(params) {
     // ========================================
     // 5. Extraer datos de respuesta
     // ========================================
-    let codigoRetorno = '0000';
-    let mensajeRetorno = 'Evento registrado correctamente';
-    let idEventoSET = null;
-    let estadoEvento = 'registrado';
+    // La respuesta de setapi es un objeto ya parseado (o un string XML en
+    // versiones viejas). El parser anterior buscaba una estructura que SIFEN
+    // no usa y, al fallar, asumia "registrado correctamente": un evento
+    // rechazado por SET quedaba registrado como exitoso.
+    const { extraerCodigoRetorno, extraerMensajeRetorno, extraerEstadoResultado, buscarEnRespuesta } =
+      require('../utils/estadoSifen');
 
-    try {
-      const xml2js = require('xml2js');
-      const respuestaObj = await xml2js.parseStringPromise(respuesta);
-      
-      // Extraer de la respuesta SOAP
-      const body = respuestaObj['soap:Envelope']?.['soap:Body'];
-      if (body) {
-        const respuestaEvento = body['respuestaEvento'] || body['ns2:respuestaEvento'];
-        if (respuestaEvento) {
-          codigoRetorno = respuestaEvento['codigoRetorno']?.[0] || '0000';
-          mensajeRetorno = respuestaEvento['mensajeRetorno']?.[0] || mensajeRetorno;
-          idEventoSET = respuestaEvento['idEvento']?.[0];
-        }
-      }
+    const codigoRetorno = extraerCodigoRetorno(respuesta);
+    const mensajeRetorno = extraerMensajeRetorno(respuesta) || 'Sin mensaje de SET';
+    const estadoResultado = extraerEstadoResultado(respuesta); // Aprobado | Rechazado
+    const idEventoSET =
+      (typeof respuesta === 'object' ? buscarEnRespuesta(respuesta, 'dProtAut') : null);
 
-      // Determinar estado según código de retorno
-      if (codigoRetorno !== '0000') {
-        estadoEvento = 'rechazado';
-      }
-    } catch (err) {
-      console.warn('⚠️ No se pudo parsear respuesta de SET:', err.message);
-    }
+    // 0600/0601 = evento registrado segun el Manual Tecnico v150
+    const registrado = estadoResultado === 'Aprobado' || codigoRetorno === '0600' || codigoRetorno === '0601';
+    const estadoEvento = registrado ? 'registrado' : 'rechazado';
+
+    console.log(`📥 SET respondio al evento: ${codigoRetorno ?? 'sin codigo'} (${estadoEvento}) - ${mensajeRetorno}`);
 
     // ========================================
     // 6. Guardar evento en BD

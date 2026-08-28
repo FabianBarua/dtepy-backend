@@ -79,6 +79,15 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     // 2. Usar datos directamente del JSON
     // ========================================
     const datosCompletos = datosFactura.data || datosFactura;
+
+    // El CDC lleva un codigo de seguridad de 9 digitos. Si la integracion no
+    // lo manda, xmlgen NO lo valida y arma un CDC con la palabra "undefined"
+    // adentro: un documento firmado pero corrupto. Se genera uno aca.
+    if (!datosCompletos.codigoSeguridadAleatorio) {
+      datosCompletos.codigoSeguridadAleatorio = String(crypto.randomInt(1, 1e9)).padStart(9, '0');
+      console.log('🎲 codigoSeguridadAleatorio generado:', datosCompletos.codigoSeguridadAleatorio);
+    }
+
     await reportarProgreso(15);
 
     // ========================================

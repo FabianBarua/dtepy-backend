@@ -469,6 +469,20 @@ genera, firma y envía a SET en un worker aparte. Para seguir el avance, usar
 
 La empresa emisora se resuelve por el \`param.ruc\`, que debe corresponder a una
 empresa del alcance del token, activa y con certificado válido.
+
+**Moneda extranjera** (verificado en producción): \`data.moneda: "USD"|"BRL"\`
++ \`data.condicionTipoCambio: 1\` (cotización global) + \`data.cambio\` (guaraníes
+por unidad). Los precios de los items y los montos de \`condicion.entregas\` van
+en la moneda de la operación (cada entrega también lleva \`moneda\` y \`cambio\`);
+el total en guaraníes (dTotalGs) lo calcula el sistema.
+
+**IVA por item** (\`items[].ivaTipo\`): 1 = gravado (con \`ivaBase\` % gravado y
+\`iva\` 10/5), 2 = exonerado y 3 = exento (ambos con \`ivaBase: 0, iva: 0\`),
+4 = gravado parcial (\`ivaBase\` = % gravado). **Régimen de Turismo (RTC,
+Dto. 2063/2024)**: venta a turista no residente exenta de IVA — item con
+\`ivaTipo: 3\`, cliente con pasaporte (\`documentoTipo: 2\`), \`tipoOperacion: 4\`
+(B2F) y país de residencia extranjero, y \`param.tipoRegimen: 1\`. Requiere
+estar inscripto en el registro RTC de la DNIT.
 `.trim(),
         requestBody: {
           required: true,
@@ -950,10 +964,26 @@ quedan indescifrables.
 Manual Técnico SIFEN v150, sección 11.
 
 **Cancelación**: solo la puede pedir el emisor, sobre una factura ya aprobada
-por SET, y dentro de las **48 horas** de aprobada (168 horas para el resto de
-los documentos). El backend valida el plazo localmente y responde
-\`EVENTO_CANCELACION_FUERA_DE_PLAZO\` si venció; en ese caso corresponde
-emitir una Nota de Crédito. La cancelación es **irreversible**.
+por SET (estado \`aceptado\` u \`observado\`), y dentro de las **48 horas** de
+aprobada (168 horas para el resto de los documentos). El backend valida el
+plazo localmente y responde \`EVENTO_CANCELACION_FUERA_DE_PLAZO\` si venció;
+en ese caso corresponde emitir una Nota de Crédito. La cancelación es
+**irreversible**: al registrarse (\`dCodRes 0600\`) la factura local pasa a
+\`estadoSifen: cancelado\`.
+
+**Idempotencia**: si el DTE ya estaba cancelado, SET responde
+\`4003 "CDC ya se encuentra con el mismo evento solicitado"\` y el backend lo
+trata como \`registrado\` (marca la factura igual). SET a veces responde
+\`0100 Error Inesperado\` (transitorio): reintentar el mismo pedido.
+
+**Eventos del receptor** (conformidad, disconformidad, desconocimiento,
+notificación): los campos extra que exige SIFEN van en \`datosEvento\`.
+\`devolucion_ajuste\` **no** es un evento: se documenta con Nota de Crédito
+(la API lo rechaza con 400).
+
+El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
+\`codigoRetorno 0600/0601\` (o 4003 idempotente) = éxito;
+\`rechazado\` = SET no lo aceptó (ver \`mensajeRetorno\`).
 `.trim(),
         requestBody: {
           required: true,
@@ -964,8 +994,18 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
                 required: ['invoiceId', 'tipoEvento', 'descripcion'],
                 properties: {
                   invoiceId: objectId('ID de la factura'),
-                  tipoEvento: ref('TipoEvento'),
-                  descripcion: { type: 'string', description: 'Motivo del evento' },
+                  tipoEvento: {
+                    type: 'string',
+                    enum: ['cancelacion', 'conformidad', 'disconformidad', 'desconocimiento', 'notificacion_recepcion'],
+                    description: 'Tipo de evento a registrar (devolucion_ajuste no se acepta: usar Nota de Crédito)'
+                  },
+                  descripcion: { type: 'string', minLength: 5, maxLength: 500, description: 'Motivo del evento (SIFEN exige de 5 a 500 caracteres)' },
+                  datosEvento: {
+                    type: 'object',
+                    description: 'Campos adicionales que exige SIFEN según el tipo de evento. cancelacion/disconformidad: ninguno. conformidad: tipoConformidad (1=total, 2=parcial; con 2 es obligatoria fechaRecepcion "YYYY-MM-DDTHH:mm:ss"). desconocimiento/notificacion_recepcion: fechaEmision, fechaRecepcion, tipoReceptor, nombre (y documento del receptor).',
+                    additionalProperties: true,
+                    example: { tipoConformidad: 1 }
+                  },
                   usuario: {
                     type: 'object',
                     description: 'Opcional; por defecto se toma del usuario autenticado',
@@ -980,10 +1020,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           }
         },
         responses: {
-          200: okJson('Evento enviado a SET', envuelto(ref('ResultadoEvento'))),
-          400: respuestaError('Faltan campos, el tipo no es válido, la factura no está aprobada, o la cancelación está fuera de plazo (EVENTO_CANCELACION_FUERA_DE_PLAZO, con horasLimite y horasTranscurridas)'),
+          200: okJson('Evento enviado a SET (ver data.estadoEvento: registrado o rechazado)', envuelto(ref('ResultadoEvento'))),
+          400: respuestaError('Faltan campos, el tipo no es válido (devolucion_ajuste incluido), la factura no está aprobada (aceptado/observado), o la cancelación está fuera de plazo (EVENTO_CANCELACION_FUERA_DE_PLAZO, con horasLimite y horasTranscurridas)'),
           401: NO_AUTORIZADO,
-          404: respuestaError('Factura no encontrada')
+          404: respuestaError('Factura no encontrada'),
+          500: respuestaError('EVENTO_ENVIO_ERROR: fallo generando/firmando/enviando el evento (p.ej. datosEvento incompleto para eventos del receptor)')
         }
       }
     },
@@ -1448,7 +1489,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           'desconocimiento',
           'notificacion_recepcion'
         ],
-        description: 'Emisor: cancelacion, devolucion_ajuste. Receptor: el resto.'
+        description: 'Emisor: cancelacion. Receptor: conformidad, disconformidad, desconocimiento, notificacion_recepcion. devolucion_ajuste queda solo como valor histórico en registros viejos: /api/eventos/enviar lo rechaza (la devolución se documenta con Nota de Crédito).'
       },
 
       // ------------------------------ salud / auth ------------------------------
@@ -1680,6 +1721,10 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           codigoRetorno: { type: 'string', nullable: true },
           mensajeRetorno: { type: 'string', nullable: true },
           digestValue: { type: 'string', nullable: true },
+          facturaHash: { type: 'string', nullable: true, description: 'Hash interno de idempotencia del payload' },
+          tipoEmision: { type: 'integer', example: 1 },
+          datosFactura: { type: 'object', additionalProperties: true, description: 'Payload original con el que se emitió (param/data)' },
+          xmlContent: { type: 'string', nullable: true, description: 'XML firmado del DTE' },
           xmlPath: { type: 'string', nullable: true },
           kudePath: { type: 'string', nullable: true },
           grupoLoteId: { ...objectId(), nullable: true },
@@ -1872,9 +1917,22 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           estadoEvento: { type: 'string', enum: ['enviado', 'registrado', 'rechazado', 'error'] },
           codigoRetorno: { type: 'string', nullable: true },
           mensajeRetorno: { type: 'string', nullable: true },
-          idEventoSET: { type: 'string', nullable: true, description: 'Identificador que asigna SET al registrar el evento' },
-          fechaRegistro: fechaHora(),
-          createdAt: fechaHora()
+          idEventoSET: { type: 'string', nullable: true, description: 'Protocolo dProtAut que asigna SET al registrar el evento' },
+          usuario: {
+            type: 'object',
+            description: 'Quién solicitó el evento',
+            properties: {
+              documentoNumero: { type: 'string' },
+              nombre: { type: 'string' }
+            }
+          },
+          rucEmpresa: { type: 'string' },
+          rucReceptor: { type: 'string', nullable: true },
+          xmlEvento: { type: 'string', description: 'XML del evento generado (con sobre SOAP), sin firmar' },
+          xmlFirmado: { type: 'string', description: 'XML del evento firmado, tal como se envió a SET' },
+          fechaRegistro: fechaHora('Puede faltar en eventos creados por /api/eventos/enviar (usar createdAt)'),
+          createdAt: fechaHora(),
+          updatedAt: fechaHora()
         },
         additionalProperties: true
       },
@@ -1886,7 +1944,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           success: { type: 'boolean' },
           eventoId: objectId('ID del evento guardado'),
           idEventoSET: { type: 'string', nullable: true },
-          codigoRetorno: { type: 'string', nullable: true, example: '0600', description: '0600/0601 = evento registrado' },
+          codigoRetorno: { type: 'string', nullable: true, example: '0600', description: '0600/0601 = evento registrado. En cancelaciones, 4003/4155/4204 ("ya cancelado") también se reportan como registrado (idempotente). 0100 = error transitorio de SET (reintentar).' },
           mensajeRetorno: { type: 'string', nullable: true },
           estadoEvento: { type: 'string', enum: ['enviado', 'registrado', 'rechazado', 'error'] },
           tipoEvento: ref('TipoEvento'),
@@ -2213,7 +2271,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
               timbradoNumero: { type: 'string', example: '12558946' },
               timbradoFecha: { type: 'string', format: 'date', example: '2022-08-25' },
               tipoContribuyente: { type: 'integer', example: 2 },
-              tipoRegimen: { type: 'integer', example: 8 },
+              tipoRegimen: { type: 'integer', example: 8, description: '1 = Régimen de Turismo, 2 = Importador, 3 = Exportador, 4 = Maquila, 5 = Ley 60/90, 6 = Pequeño Productor, 7 = Mediano Productor, 8 = Régimen Contable' },
               actividadesEconomicas: {
                 type: 'array',
                 items: {
@@ -2257,9 +2315,10 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
               tipoEmision: { type: 'integer', example: 1 },
               tipoTransaccion: { type: 'integer', example: 1 },
               tipoImpuesto: { type: 'integer', example: 1 },
-              moneda: { type: 'string', example: 'PYG' },
+              moneda: { type: 'string', example: 'PYG', description: 'PYG (por defecto), USD, BRL, etc. Si no es PYG, condicionTipoCambio y cambio son obligatorios' },
               condicionAnticipo: { type: 'integer' },
-              condicionTipoCambio: { type: 'integer' },
+              condicionTipoCambio: { type: 'integer', description: '1 = cotización global de la operación (con data.cambio), 2 = cotización por item (cambio en cada item)' },
+              cambio: { type: 'number', example: 7300, description: 'Guaraníes por unidad de la moneda (obligatorio si moneda != PYG y condicionTipoCambio = 1)' },
               descuentoGlobal: { type: 'number' },
               cliente: {
                 type: 'object',
@@ -2268,7 +2327,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
                   ruc: { type: 'string' },
                   razonSocial: { type: 'string' },
                   nombreFantasia: { type: 'string' },
-                  tipoOperacion: { type: 'integer' },
+                  tipoOperacion: { type: 'integer', description: '1 = B2B, 2 = B2C, 3 = B2G, 4 = B2F (consumidor final extranjero, p.ej. turista RTC)' },
                   direccion: { type: 'string' },
                   numeroCasa: { type: 'string' },
                   departamento: { type: 'integer' },
@@ -2276,7 +2335,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
                   ciudad: { type: 'integer' },
                   pais: { type: 'string', example: 'PRY' },
                   tipoContribuyente: { type: 'integer' },
-                  documentoTipo: { type: 'integer' },
+                  documentoTipo: { type: 'integer', description: '1 = cédula paraguaya, 2 = pasaporte, 3 = cédula extranjera, 4 = carnet de residencia, 9 = otro' },
                   documentoNumero: { type: 'string' },
                   telefono: { type: 'string' },
                   celular: { type: 'string' },
@@ -2293,9 +2352,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
                     items: {
                       type: 'object',
                       properties: {
-                        tipo: { type: 'integer' },
-                        monto: { type: 'string' },
-                        moneda: { type: 'string' }
+                        tipo: { type: 'integer', description: '1 = efectivo, 3 = tarjeta de crédito (exige infoTarjeta), etc.' },
+                        monto: { type: 'string', description: 'En la moneda de la entrega' },
+                        moneda: { type: 'string' },
+                        monedaDescripcion: { type: 'string', example: 'US Dollar' },
+                        cambio: { type: 'number', description: 'Guaraníes por unidad (obligatorio si la moneda de la entrega no es PYG)' }
                       }
                     }
                   }
@@ -2311,11 +2372,11 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
                     descripcion: { type: 'string' },
                     unidadMedida: { type: 'integer', example: 77 },
                     cantidad: { type: 'number' },
-                    precioUnitario: { type: 'number' },
-                    cambio: { type: 'number' },
-                    ivaTipo: { type: 'integer', example: 1 },
-                    ivaBase: { type: 'number', example: 100 },
-                    iva: { type: 'integer', example: 10 }
+                    precioUnitario: { type: 'number', description: 'En la moneda de la operación (data.moneda)' },
+                    cambio: { type: 'number', description: 'Cotización por item, solo con condicionTipoCambio = 2' },
+                    ivaTipo: { type: 'integer', example: 1, description: '1 = gravado, 2 = exonerado, 3 = exento, 4 = gravado parcial' },
+                    ivaBase: { type: 'number', example: 100, description: '% del precio que está gravado (100 normal; 0 obligatorio con ivaTipo 2 o 3)' },
+                    iva: { type: 'integer', example: 10, description: 'Tasa: 10, 5 o 0 (0 obligatorio con ivaTipo 2 o 3)' }
                   }
                 }
               },

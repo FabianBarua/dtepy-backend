@@ -2313,6 +2313,12 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
                 maxLength: 3,
                 default: '001',
                 description: 'Punto de expedición POR DEFECTO para emitir cuando la factura no trae data.punto. Cada punto lleva numeración correlativa propia.'
+              },
+              monedasPermitidas: {
+                type: 'array',
+                items: { type: 'string', pattern: '^[A-Z]{3}$' },
+                default: ['PYG', 'USD'],
+                description: 'Política contable: monedas en las que la empresa emite. Una factura en otra moneda se rechaza con 400 MONEDA_NO_PERMITIDA (SIFEN admite cualquier ISO 4217, la restricción es de la empresa).'
               }
             }
           },
@@ -2489,7 +2495,7 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
               tipoEmision: { type: 'integer', example: 1 },
               tipoTransaccion: { type: 'integer', example: 1 },
               tipoImpuesto: { type: 'integer', example: 1 },
-              moneda: { type: 'string', example: 'PYG', description: 'PYG (por defecto), USD, BRL, etc. Si no es PYG, condicionTipoCambio y cambio son obligatorios' },
+              moneda: { type: 'string', example: 'PYG', description: 'PYG (por defecto) o una de las monedas habilitadas de la empresa (configuracionSifen.monedasPermitidas, default PYG y USD) — otra moneda se rechaza con 400 MONEDA_NO_PERMITIDA. Si no es PYG, condicionTipoCambio es obligatorio y cambio se toma del payload o de la cotización declarada vigente' },
               condicionAnticipo: { type: 'integer' },
               condicionTipoCambio: { type: 'integer', description: '1 = cotización global de la operación (con data.cambio), 2 = cotización por item (cambio en cada item)' },
               cambio: { type: 'number', example: 7300, description: 'Guaraníes por unidad de la moneda (obligatorio si moneda != PYG y condicionTipoCambio = 1)' },

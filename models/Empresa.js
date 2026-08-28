@@ -120,6 +120,13 @@ const empresaSchema = new mongoose.Schema({
       type: String,
       enum: ['normal', 'lotes'],
       default: 'normal'
+    },
+    // Monedas en las que la empresa acepta emitir (política contable).
+    // SIFEN admite cualquier ISO 4217, pero la contabilidad define cuáles
+    // usa: una emisión en otra moneda se rechaza con MONEDA_NO_PERMITIDA.
+    monedasPermitidas: {
+      type: [String],
+      default: ['PYG', 'USD']
     }
   },
   

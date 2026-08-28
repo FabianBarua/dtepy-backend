@@ -42,6 +42,17 @@ function validarDatosEmisor({ configuracionSifen, actividadesEconomicas, estable
     } else if (configuracionSifen.timbradoFecha && !/^\d{4}-\d{2}-\d{2}$/.test(configuracionSifen.timbradoFecha)) {
       return 'timbradoFecha inválida: formato YYYY-MM-DD (fecha de inicio de vigencia del timbrado)';
     }
+    if (configuracionSifen.monedasPermitidas !== undefined) {
+      if (!Array.isArray(configuracionSifen.monedasPermitidas) || configuracionSifen.monedasPermitidas.length === 0) {
+        return 'monedasPermitidas debe ser un array con al menos una moneda (ej. ["PYG","USD"])';
+      }
+      configuracionSifen.monedasPermitidas = configuracionSifen.monedasPermitidas.map((m) => String(m).trim().toUpperCase());
+      for (const m of configuracionSifen.monedasPermitidas) {
+        if (!/^[A-Z]{3}$/.test(m)) {
+          return `Moneda "${m}" inválida en monedasPermitidas: código ISO 4217 de 3 letras (ej. PYG, USD)`;
+        }
+      }
+    }
   }
   if (actividadesEconomicas !== undefined && actividadesEconomicas !== null) {
     if (!Array.isArray(actividadesEconomicas)) {

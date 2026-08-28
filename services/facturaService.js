@@ -130,6 +130,19 @@ async function crearFactura(datosFactura) {
   validarEmpresaActiva(empresa);
   validarCertificadoValido(empresa);
 
+  // Política de monedas: SIFEN acepta cualquier ISO 4217, pero la
+  // contabilidad de la empresa define en cuáles emite (Kingston: PYG y USD).
+  const monedaOperacion = String(data.moneda || 'PYG').toUpperCase();
+  const monedasPermitidas = empresa.configuracionSifen?.monedasPermitidas?.length
+    ? empresa.configuracionSifen.monedasPermitidas
+    : ['PYG', 'USD'];
+  if (!monedasPermitidas.includes(monedaOperacion)) {
+    throw Object.assign(
+      new Error(`Moneda ${monedaOperacion} no permitida por la política de la empresa. Monedas habilitadas: ${monedasPermitidas.join(', ')} (configurable en la empresa: configuracionSifen.monedasPermitidas)`),
+      { statusCode: 400, errorCode: 'MONEDA_NO_PERMITIDA' }
+    );
+  }
+
   // Establecimiento y punto de expedición: si el payload no los trae, se usan
   // los configurados por defecto en la empresa. Debe resolverse ANTES de la
   // numeración (la secuencia es por establecimiento+punto).

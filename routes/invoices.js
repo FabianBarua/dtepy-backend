@@ -686,6 +686,19 @@ router.post('/:id/refresh-status', verificarPermiso('facturas:crear'), async (re
       console.log(`✅ Estado final '${invoiceRecord.estadoSifen}' - No es necesario consultar a SET`);
       console.log(`   Los estados finales no cambian según Manual Técnico v150`);
 
+      // Auto-corrección: el CDC es la verdad sobre est-punto-numero del DTE.
+      // Un reintento antiguo pudo dejar el correlativo local desfasado (bug
+      // corregido en el flujo de emisión); acá se sana el registro al
+      // consultarlo, sin llamar a SET.
+      if (invoiceRecord.cdc && invoiceRecord.cdc.length === 44) {
+        const correlativoCDC = `${invoiceRecord.cdc.slice(11, 14)}-${invoiceRecord.cdc.slice(14, 17)}-${invoiceRecord.cdc.slice(17, 24)}`;
+        if (invoiceRecord.correlativo !== correlativoCDC) {
+          console.log(`🩹 Correlativo corregido desde el CDC: ${invoiceRecord.correlativo} -> ${correlativoCDC}`);
+          invoiceRecord.correlativo = correlativoCDC;
+          await invoiceRecord.save();
+        }
+      }
+
       return res.json({
         success: true,
         message: 'Estado final - No se consultó a SET (no hay cambios posibles)',

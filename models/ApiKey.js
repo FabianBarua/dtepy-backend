@@ -40,7 +40,9 @@ const apiKeySchema = new mongoose.Schema({
   },
   permisos: {
     type: [String],
-    enum: ['facturas:crear', 'facturas:leer', 'facturas:eliminar', 'stats:leer', 'admin'],
+    // 'cotizaciones:editar' NO va en los defaults: declarar cotizaciones vía
+    // API es un permiso explícito (pensado para un actualizador automático).
+    enum: ['facturas:crear', 'facturas:leer', 'facturas:eliminar', 'stats:leer', 'cotizaciones:editar', 'admin'],
     default: ['facturas:crear', 'facturas:leer', 'stats:leer']
   },
   activa: {

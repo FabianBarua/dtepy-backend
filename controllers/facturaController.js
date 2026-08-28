@@ -1,6 +1,7 @@
 const { crearFactura } = require('../services/facturaService');
 const { buscarEmpresaPorRUC } = require('../services/empresaService');
 const { perteneceAlAlcance } = require('../middleware/alcance');
+const { resolverCambioParaEmision } = require('../services/cotizacionService');
 
 exports.crear = async (req, res) => {
   try {
@@ -14,6 +15,17 @@ exports.crear = async (req, res) => {
         error: 'EMPRESA_FUERA_DE_ALCANCE',
         message: 'El RUC emisor no corresponde a una empresa de este usuario o API Key'
       });
+    }
+
+    // Moneda extranjera sin data.cambio: se completa con la cotización
+    // DECLARADA por el usuario (vigente). Sin cotización declarada y sin
+    // cambio en el payload, la emisión se rechaza (COTIZACION_FALTANTE) —
+    // el valor queda congelado acá, al momento de la emisión.
+    if (empresaEmisora) {
+      const resolucion = await resolverCambioParaEmision(req.body?.data || req.body, empresaEmisora._id);
+      if (resolucion.aplicado && resolucion.origen === 'declarada') {
+        console.log(`💱 Cambio ${resolucion.moneda} tomado de la cotización declarada: ${resolucion.cambio} Gs`);
+      }
     }
 
     const resultado = await crearFactura(req.body);

@@ -1348,6 +1348,125 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
     },
 
     // -----------------------------------------------------------------------
+    // Cotizaciones
+    // -----------------------------------------------------------------------
+    '/api/cotizaciones': {
+      get: {
+        tags: ['Cotizaciones'],
+        summary: 'Cotizaciones vigentes',
+        description: 'Última cotización declarada por empresa y moneda (guaraníes por unidad). JWT o API Key con `facturas:leer`.',
+        responses: {
+          200: {
+            description: 'Vigentes por empresa y moneda',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          cotizacionId: { type: 'string', example: '6a91b2c3d4e5f60718293a4b' },
+                          empresaId: { type: 'string' },
+                          moneda: { type: 'string', example: 'USD' },
+                          valor: { type: 'number', example: 7300, description: 'Guaraníes por unidad de la moneda' },
+                          declaradaPor: {
+                            type: 'object',
+                            properties: {
+                              tipo: { type: 'string', enum: ['usuario', 'api_key'] },
+                              nombre: { type: 'string' },
+                              email: { type: 'string' }
+                            }
+                          },
+                          declaradaEn: { type: 'string', format: 'date-time' }
+                        }
+                      }
+                    },
+                    monedasSoportadas: { type: 'array', items: { type: 'string' }, description: 'Códigos ISO aceptados (catálogo SIFEN, sin PYG)' }
+                  }
+                }
+              }
+            }
+          },
+          401: { description: 'Token faltante o inválido' }
+        }
+      },
+      post: {
+        tags: ['Cotizaciones'],
+        summary: 'Declarar una cotización',
+        description: 'Declara la cotización vigente de una moneda para la empresa (queda historial de quién y cuándo). La cotización SIEMPRE la declara el usuario: el sistema no la consulta de ninguna fuente externa. Sesión JWT, o API Key con permiso `cotizaciones:editar` (pensado para un actualizador automático externo). Con una sola empresa en el alcance, `empresaId`/`ruc` es opcional.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['moneda', 'valor'],
+                properties: {
+                  moneda: { type: 'string', example: 'USD', description: 'Código ISO del catálogo SIFEN (distinto de PYG)' },
+                  valor: { type: 'number', example: 7300, description: 'Guaraníes por unidad de la moneda, mayor a 0' },
+                  empresaId: { type: 'string', description: 'Opcional si el alcance tiene una sola empresa' },
+                  ruc: { type: 'string', description: 'Alternativa a empresaId', example: '80055783-2' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          201: {
+            description: 'Cotización declarada (vigente desde ahora)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: 'Cotización USD declarada: 7300 Gs' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        cotizacionId: { type: 'string' },
+                        empresaId: { type: 'string' },
+                        ruc: { type: 'string' },
+                        moneda: { type: 'string', example: 'USD' },
+                        valor: { type: 'number', example: 7300 },
+                        declaradaPor: { type: 'object' },
+                        declaradaEn: { type: 'string', format: 'date-time' }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          400: { description: 'Moneda inválida, valor inválido o empresa no indicada (MONEDA_INVALIDA / COTIZACION_INVALIDA / EMPRESA_REQUERIDA)' },
+          401: { description: 'Token faltante o inválido' },
+          403: { description: 'API Key sin permiso cotizaciones:editar' },
+          404: { description: 'EMPRESA_FUERA_DE_ALCANCE' }
+        }
+      }
+    },
+
+    '/api/cotizaciones/historial': {
+      get: {
+        tags: ['Cotizaciones'],
+        summary: 'Historial de declaraciones',
+        description: 'Declaraciones más recientes primero, con quién y cuándo (respaldo contable).',
+        parameters: [
+          { name: 'moneda', in: 'query', schema: { type: 'string' }, example: 'USD' },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, maximum: 200 } }
+        ],
+        responses: {
+          200: { description: 'Lista de declaraciones (empresaId populado con ruc y nombreFantasia)' },
+          401: { description: 'Token faltante o inválido' }
+        }
+      }
+    },
+
+    // -----------------------------------------------------------------------
     // Logs
     // -----------------------------------------------------------------------
     '/api/logs': {

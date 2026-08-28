@@ -275,7 +275,19 @@ workers asíncronos sobre Redis, no en el request.
         responses: {
           200: okJson('Perfil actualizado', envuelto({
             type: 'object',
-            properties: { usuario: ref('PerfilUsuario') }
+            properties: {
+              usuario: {
+                type: 'object',
+                description: 'Versión reducida (sin rol ni fechas)',
+                properties: {
+                  id: objectId(),
+                  username: { type: 'string' },
+                  email: { type: 'string', format: 'email' },
+                  nombre: { type: 'string' },
+                  apellido: { type: 'string' }
+                }
+              }
+            }
           })),
           401: NO_AUTORIZADO,
           403: respuestaError('Requiere sesión de usuario (no API Key)')
@@ -389,7 +401,7 @@ workers asíncronos sobre Redis, no en el request.
         description: 'Solo con sesión JWT. No incluye la clave ni su hash.',
         parameters: [paramRuta('id', 'ID de la API Key')],
         responses: {
-          200: okJson('Detalle', envuelto(ref('ApiKeyResumen'), false)),
+          200: okJson('Detalle', envuelto(ref('ApiKeyDetalle'), false)),
           401: NO_AUTORIZADO,
           403: respuestaError('Requiere sesión de usuario (no API Key)'),
           404: NO_ENCONTRADO
@@ -416,7 +428,24 @@ workers asíncronos sobre Redis, no en el request.
         description: 'Genera una clave nueva manteniendo nombre y permisos. **La anterior deja de funcionar de inmediato.** La nueva se muestra una sola vez. Solo con sesión JWT.',
         parameters: [paramRuta('id', 'ID de la API Key')],
         responses: {
-          200: okJson('Renovada (única vez que se ve la clave nueva)', ref('ApiKeyCreada')),
+          200: okJson('Renovada (única vez que se ve la clave nueva)', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              data: {
+                type: 'object',
+                description: 'A diferencia de la creación, solo vuelven estos campos',
+                properties: {
+                  id: objectId(),
+                  key: { type: 'string', description: '⚠️ Única vez que se muestra' },
+                  nombre: { type: 'string' },
+                  fechaCreacion: fechaHora()
+                }
+              },
+              advertencia: { type: 'string' }
+            }
+          }),
           401: NO_AUTORIZADO,
           403: respuestaError('Requiere sesión de usuario (no API Key)'),
           404: NO_ENCONTRADO
@@ -568,7 +597,17 @@ empresa del alcance del token, activa y con certificado válido.
           { name: 'estado', in: 'query', schema: { type: 'string', enum: ['success', 'error', 'warning'] } }
         ],
         responses: {
-          200: okJson('Listado paginado', ref('ListadoLogs')),
+          200: okJson('Listado paginado (paginación distinta a /api/logs: usa currentPage y no incluye limit)', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              logs: { type: 'array', items: ref('LogOperacion') },
+              totalPages: { type: 'integer' },
+              currentPage: { type: 'integer' },
+              total: { type: 'integer' }
+            }
+          }),
           401: NO_AUTORIZADO
         }
       }
@@ -594,10 +633,16 @@ empresa del alcance del token, activa y con certificado válido.
           }
         },
         responses: {
-          200: okJson('Facturas eliminadas', envuelto({
+          200: okJson('Facturas eliminadas', {
             type: 'object',
-            properties: { deletedCount: { type: 'integer', example: 152 } }
-          })),
+            description: 'Los contadores van en la raiz, no dentro de data',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              deletedCount: { type: 'integer', example: 152, description: 'Facturas eliminadas' },
+              deletedLogs: { type: 'integer', example: 480, description: 'Logs de operaciones eliminados' }
+            }
+          }),
           400: respuestaError('Falta la contraseña o no coincide'),
           401: NO_AUTORIZADO,
           403: respuestaError('Requiere sesión de usuario admin')
@@ -619,10 +664,18 @@ empresa del alcance del token, activa y con certificado válido.
       delete: {
         tags: ['Facturas'],
         summary: 'Eliminar una factura',
-        description: 'Requiere el permiso `facturas:eliminar` en API Keys.',
+        description: 'Requiere el permiso `facturas:eliminar` en API Keys. Una factura que pertenece a un lote no se puede eliminar (400 FACTURA_BLOQUEADA_POR_LOTE).',
         parameters: [paramRuta('id', 'ID de la factura')],
         responses: {
-          200: okJson('Eliminada'),
+          200: okJson('Eliminada', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              deletedId: objectId('ID de la factura eliminada')
+            }
+          }),
+          400: respuestaError('La factura pertenece a un lote y no puede eliminarse'),
           401: NO_AUTORIZADO,
           403: respuestaError('La API Key no tiene el permiso facturas:eliminar'),
           404: NO_ENCONTRADO
@@ -1074,7 +1127,14 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         description: 'Solo lotes en estado `en_espera` o `error`. Requiere `facturas:eliminar` en API Keys.',
         parameters: [paramRuta('id', 'ID del lote')],
         responses: {
-          200: okJson('Eliminado'),
+          200: okJson('Eliminado', {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              facturasDesvinculadas: { type: 'integer', description: 'Facturas que quedaron sin lote (no se eliminan)' }
+            }
+          }),
           400: respuestaError('El lote no está en un estado eliminable'),
           401: NO_AUTORIZADO,
           404: NO_ENCONTRADO
@@ -1108,10 +1168,9 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
               type: 'object',
               properties: {
                 loteId: objectId(),
-                estado: { type: 'string' },
-                error: { type: 'string', nullable: true }
-              },
-              additionalProperties: true
+                success: { type: 'boolean' },
+                error: { type: 'string', description: 'Presente solo cuando success es false' }
+              }
             }
           }, false)),
           401: NO_AUTORIZADO
@@ -1472,6 +1531,28 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         }
       },
 
+      ApiKeyDetalle: {
+        type: 'object',
+        description: 'Documento crudo de la base (a diferencia del listado, usa _id y trae metadatos)',
+        properties: {
+          _id: objectId(),
+          nombre: { type: 'string' },
+          descripcion: { type: 'string' },
+          permisos: { type: 'array', items: { type: 'string' } },
+          activa: { type: 'boolean' },
+          keyParcial: { type: 'string', nullable: true },
+          expiracion: fechaHora(),
+          ultimoUso: fechaHora(),
+          ipOrigen: { type: 'string', nullable: true, description: 'IP del último uso' },
+          usuario: objectId('Dueño de la key'),
+          empresaId: { ...objectId('Empresa asociada'), nullable: true },
+          fechaCreacion: fechaHora(),
+          createdAt: fechaHora(),
+          updatedAt: fechaHora()
+        },
+        additionalProperties: true
+      },
+
       ApiKeyCreada: {
         type: 'object',
         properties: {
@@ -1675,13 +1756,28 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         type: 'object',
         properties: {
           success: { type: 'boolean' },
+          message: { type: 'string' },
           encontrado: { type: 'boolean' },
           cdc: { type: 'string' },
           estadoLocal: ref('EstadoSifen'),
-          estadoSET: { type: 'string', nullable: true, description: 'Estado del documento según la consulta a SET' },
-          actualizado: { type: 'boolean', description: 'true si el estado local se actualizó con esta consulta' }
-        },
-        additionalProperties: true
+          proceso: ref('Proceso'),
+          estadoSET: { type: 'string', nullable: true, description: 'Estado según la consulta en vivo a SET (null si no se pudo consultar)' },
+          estadoActualizado: { type: 'boolean', description: 'true si el estado de SET difiere del local' },
+          data: {
+            type: 'object',
+            properties: {
+              correlativo: { type: 'string' },
+              codigoRetorno: { type: 'string', nullable: true },
+              mensajeRetorno: { type: 'string', nullable: true },
+              fechaCreacion: fechaHora(),
+              fechaEnvio: fechaHora(),
+              fechaProceso: fechaHora(),
+              total: { type: 'number' },
+              cliente: { type: 'object', additionalProperties: true }
+            },
+            additionalProperties: true
+          }
+        }
       },
 
       RefreshEstado: {
@@ -1692,7 +1788,22 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           esEstadoFinal: { type: 'boolean' },
           consultoSET: { type: 'boolean', description: 'false si no hizo falta consultar (estado final)' },
           estadoAnterior: ref('EstadoSifen'),
-          estadoNuevo: { allOf: [ref('EstadoSifen')], description: 'Presente si consultó a SET' }
+          estadoActual: ref('EstadoSifen'),
+          estadoVisual: { type: 'string' },
+          estadoCambio: { type: 'boolean', description: 'true si la consulta cambió el estado local' },
+          data: {
+            type: 'object',
+            properties: {
+              estado: ref('EstadoSifen'),
+              estadoVisual: { type: 'string' },
+              facturaId: objectId(),
+              correlativo: { type: 'string' },
+              cdc: { type: 'string', nullable: true },
+              codigoRetorno: { type: 'string', nullable: true },
+              mensajeRetorno: { type: 'string', nullable: true }
+            },
+            additionalProperties: true
+          }
         },
         additionalProperties: true
       },
@@ -1775,7 +1886,9 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
 
       ResultadoEvento: {
         type: 'object',
+        description: 'Resultado que devuelve el servicio de eventos (incluye su propio flag success)',
         properties: {
+          success: { type: 'boolean' },
           eventoId: objectId('ID del evento guardado'),
           idEventoSET: { type: 'string', nullable: true },
           codigoRetorno: { type: 'string', nullable: true, example: '0600', description: '0600/0601 = evento registrado' },
@@ -1895,14 +2008,14 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
         type: 'object',
         properties: {
           success: { type: 'boolean' },
-          message: { type: 'string', example: 'Se eliminaron 148 trabajos de la cola facturacion' },
+          message: { type: 'string', example: 'Se eliminaron 148 jobs completados de la cola facturacion' },
           data: {
             type: 'object',
             properties: {
-              eliminados: { type: 'integer', example: 148 },
-              queue: { type: 'string', enum: ['facturacion', 'kude'] }
-            },
-            additionalProperties: true
+              removed: { type: 'integer', example: 148, description: 'Trabajos eliminados' },
+              queue: { type: 'string', enum: ['facturacion', 'kude'] },
+              keep: { type: 'integer', description: 'Solo en clear/clear-completed: cuantos se conservaron' }
+            }
           }
         }
       },
@@ -2037,7 +2150,7 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
               },
               certificadoEnFileSystem: {
                 type: 'boolean',
-                description: 'true si el archivo .p12 existe físicamente en el volumen'
+                description: 'true si el archivo .p12 existe físicamente en el volumen. Solo presente en listar y obtener; crear/actualizar devuelven el documento sin este campo'
               },
               createdAt: fechaHora(),
               updatedAt: fechaHora()

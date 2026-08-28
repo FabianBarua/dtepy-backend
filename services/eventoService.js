@@ -54,8 +54,10 @@ async function generarXMLEvento(params) {
   // Generar ID único para el evento (numérico, hasta 10 dígitos)
   const idEvento = Math.floor(Math.random() * 1000000000).toString();
 
-  // Fecha del evento (formato SIFEN: YYYY-MM-DDTHH:MM:SS)
-  const fechaEvento = new Date().toISOString().split('.')[0];
+  // Fecha del evento en hora LOCAL (formato SIFEN: YYYY-MM-DDTHH:MM:SS).
+  // toISOString() da UTC y SET rechaza la firma "adelantada" (el contenedor
+  // corre en America/Asuncion).
+  const fechaEvento = new Date().toLocaleString('sv-SE').replace(' ', 'T');
 
   // Versión del formato según Manual Técnico v150
   const versionFormato = '150';
@@ -198,11 +200,20 @@ async function enviarEvento(params) {
     const idDocumento = generarIdSifen();
     const ambiente = empresa.configuracionSifen.modo || 'test';
 
+    // setapi.evento NO envuelve el XML ("ya viene con SoapData"): hay que
+    // mandar el sobre SOAP 1.2 con el dId como primer hijo de rEnviEventoDe,
+    // como exige el Manual Tecnico v150. La firma cubre solo rEve, asi que
+    // envolver despues de firmar no la invalida.
+    const cuerpoFirmado = xmlFirmado
+      .replace(/^<\?xml[^>]*\?>\s*/, '')
+      .replace(/<rEnviEventoDe([^>]*)>/, `<rEnviEventoDe$1><dId>${idDocumento}</dId>`);
+    const soapEvento = `<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope"><env:Header/><env:Body>${cuerpoFirmado}</env:Body></env:Envelope>`;
+
     console.log('📤 Enviando evento a SET...');
-    
+
     const respuesta = await setApi.evento(
       idDocumento,
-      xmlFirmado,
+      soapEvento,
       ambiente,
       rutaCertificado,
       contrasena

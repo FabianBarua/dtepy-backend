@@ -213,6 +213,7 @@ async function consultarResultadoLote(loteId) {
       const bloque = bloques[i];
       const estRes = campoRespuesta(bloque, 'dEstRes');
       const msgRes = campoRespuesta(bloque, 'dMsgRes');
+      const codRes = campoRespuesta(bloque, 'dCodRes');
       const cdcResp = campoRespuesta(bloque, 'dCDCGestion');
 
       let estadoIndividual;
@@ -236,7 +237,8 @@ async function consultarResultadoLote(loteId) {
       Invoice.findByIdAndUpdate(lote.facturas[i].facturaId, {
         estadoSifen: estadoIndividual,
         estadoVisual: estadoVisual,
-        mensajeRetorno: msgRes
+        mensajeRetorno: msgRes,
+        codigoRetorno: codRes
       }).catch(err => console.warn('⚠️ No se pudo actualizar factura del lote:', err.message));
     }
 

@@ -193,7 +193,11 @@ async function consultarResultadoLote(loteId) {
     return { lote, completado: false, mensaje: err.message };
   }
 
-  const codigo = campoRespuesta(soapResponse, 'dCodRes');
+  // La consulta de lote responde en dCodResLot/dMsgResLot (no dCodRes)
+  const codigo = campoRespuesta(soapResponse, 'dCodResLot')
+    ?? campoRespuesta(soapResponse, 'dCodRes');
+  const mensajeLote = campoRespuesta(soapResponse, 'dMsgResLot')
+    ?? campoRespuesta(soapResponse, 'dMsgRes');
 
   const bloques = (typeof soapResponse === 'string')
     ? (soapResponse.match(/<ns2:dProtDE>[\s\S]*?<\/ns2:dProtDE>/g) ||
@@ -247,7 +251,7 @@ async function consultarResultadoLote(loteId) {
     return { lote, completado: todosResueltos, mensaje: `Procesadas ${resultadosMatch.length} facturas` };
   }
 
-  return { lote, completado: false, mensaje: `Código: ${codigo}` };
+  return { lote, completado: false, codigoLote: codigo, mensaje: mensajeLote || `Código: ${codigo}` };
 }
 
 async function enviarPendientes() {

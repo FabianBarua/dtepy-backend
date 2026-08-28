@@ -128,7 +128,10 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
       timbradoNumero: timbrado,
       timbradoFecha: timbradoFecha,
       tipoContribuyente: param.tipoContribuyente ?? empresa.tipoContribuyente,
-      tipoRegimen: param.tipoRegimen ?? empresa.tipoRegimen,
+      // xmlgen emite cTipReg SIEMPRE (su guarda "typeof x != undefined" está
+      // rota): si queda undefined sale <cTipReg/> vacío y SET rechaza con
+      // "0160 cTipReg inválido". 8 = Régimen Contable como último recurso.
+      tipoRegimen: param.tipoRegimen ?? empresa.tipoRegimen ?? 8,
       establecimientos: param.establecimientos || establecimientosEmpresa
     };
 

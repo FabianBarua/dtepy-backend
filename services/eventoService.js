@@ -115,7 +115,6 @@ async function generarXMLEvento(params) {
             <rEve Id="${idEvento}">
               <dFecFirma>${fechaEvento}</dFecFirma>
               <dVerFor>${versionFormato}</dVerFor>
-              <dTiGDE>${codigoTipoEvento}</dTiGDE>
               <gGroupTiEvt>
                 <rGeVeCan>
                   <Id>${cdc}</Id>

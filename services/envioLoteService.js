@@ -181,9 +181,12 @@ async function consultarResultadoLote(loteId) {
 
   let soapResponse;
   try {
+    // OJO: dProtConsLote puede tener 19 digitos y parseInt() lo corrompe
+    // (Number.MAX_SAFE_INTEGER tiene 16): se consultaba un lote inexistente
+    // (SET respondia 0360). Se pasa el string tal cual.
     soapResponse = await setApi.consultaLote(
       idDocumento,
-      parseInt(lote.dProtConsLote),
+      lote.dProtConsLote,
       lote.ambiente,
       rutaCertificado,
       contrasena

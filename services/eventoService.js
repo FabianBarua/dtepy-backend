@@ -196,10 +196,13 @@ async function enviarEvento(params) {
       (typeof respuesta === 'object' ? buscarEnRespuesta(respuesta, 'dProtAut') : null);
 
     // 0600/0601 = evento registrado segun el Manual Tecnico v150.
-    // 4155 = "El CDC del DTE ya ha sido cancelado con anterioridad": para una
-    // cancelación el resultado es idempotente (el DTE está cancelado), se
-    // trata como registrado para que la factura quede marcada localmente.
-    const yaCancelado = tipoEvento === 'cancelacion' && codigoRetorno === '4155';
+    // Codigos de "ya cancelado" (idempotentes para una cancelación, el DTE
+    // está efectivamente cancelado — se marca localmente igual):
+    //   4003 = "CDC ya se encuentra con el mismo evento solicitado"
+    //          (respuesta real de SET producción al reenviar la cancelación)
+    //   4155/4204 = "El CDC del DTE ya ha sido cancelado con anterioridad"
+    const yaCancelado = tipoEvento === 'cancelacion' &&
+      ['4003', '4155', '4204'].includes(codigoRetorno);
     const registrado = estadoResultado === 'Aprobado' || codigoRetorno === '0600' ||
       codigoRetorno === '0601' || yaCancelado;
     const estadoEvento = registrado ? 'registrado' : 'rechazado';

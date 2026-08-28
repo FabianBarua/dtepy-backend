@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const Invoice = require('../models/Invoice');
+const SecuenciaFactura = require('../models/SecuenciaFactura');
 const { facturaQueue, kudeQueue } = require('../queues/facturaQueue');
 const { normalizarFechasEnObjeto } = require('../utils/fechaUtils');
 const { buscarEmpresaPorRUC, validarEmpresaActiva, validarCertificadoValido } = require('./empresaService');
@@ -29,6 +30,57 @@ function construirCorrelativo(datosFactura) {
   const punto = String(data.punto || '001').padStart(3, '0');
   const numero = String(data.numero || '0000001').padStart(7, '0');
   return `${establecimiento}-${punto}-${numero}`;
+}
+
+/**
+ * Asigna el siguiente número correlativo (7 dígitos) para la secuencia
+ * timbrado + tipo de documento + establecimiento + punto de la empresa.
+ *
+ * El contador es atómico ($inc), así que emisiones concurrentes reciben
+ * números distintos. Los números que una integración ya usó mandando
+ * data.numero explícito se saltan (el contador avanza hasta uno libre).
+ */
+async function asignarNumeroCorrelativo(empresa, datosFactura) {
+  const data = datosFactura.data || datosFactura;
+  const clave = {
+    empresaId: empresa._id,
+    timbrado: String(datosFactura.param?.timbradoNumero || empresa.configuracionSifen?.timbrado || ''),
+    tipoDocumento: Number(data.tipoDocumento || datosFactura.tipoDocumento || 1),
+    establecimiento: String(data.establecimiento || '001').padStart(3, '0'),
+    punto: String(data.punto || '001').padStart(3, '0')
+  };
+  const deDescripcion = tiposDocumentoMap[clave.tipoDocumento] || 'Factura electrónica';
+
+  for (let intento = 0; intento < 200; intento++) {
+    let secuencia;
+    try {
+      secuencia = await SecuenciaFactura.findOneAndUpdate(
+        clave,
+        { $inc: { ultimoNumero: 1 } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (error) {
+      // E11000: dos requests crearon la secuencia a la vez; reintentar toma
+      // el documento ya insertado.
+      if (error.code === 11000) continue;
+      throw error;
+    }
+
+    if (secuencia.ultimoNumero > 9999999) {
+      throw Object.assign(new Error(`Numeración agotada para ${clave.establecimiento}-${clave.punto} (timbrado ${clave.timbrado}): se llegó al 9999999`), {
+        statusCode: 409, errorCode: 'NUMERACION_AGOTADA'
+      });
+    }
+
+    const numero = String(secuencia.ultimoNumero).padStart(7, '0');
+    const correlativo = `${clave.establecimiento}-${clave.punto}-${numero}`;
+    const ocupado = await Invoice.exists({ empresaId: empresa._id, correlativo, de: deDescripcion });
+    if (!ocupado) return numero;
+  }
+
+  throw Object.assign(new Error('No se pudo asignar un número correlativo libre'), {
+    statusCode: 500, errorCode: 'NUMERACION_SIN_LIBRES'
+  });
 }
 
 function calcularTotal(datosFactura) {
@@ -77,6 +129,16 @@ async function crearFactura(datosFactura) {
   const empresa = await buscarEmpresaPorRUC(rucEmpresa);
   validarEmpresaActiva(empresa);
   validarCertificadoValido(empresa);
+
+  // Numeración: si la integración no manda data.numero, el sistema asigna el
+  // siguiente correlativo. Debe ocurrir ANTES de construir hash/correlativo
+  // (y de encolar) porque el número forma parte del CDC del documento.
+  if (!data.numero) {
+    data.numero = await asignarNumeroCorrelativo(empresa, datosFactura);
+    console.log(`🔢 Número correlativo asignado: ${data.numero}`);
+  } else {
+    data.numero = String(data.numero).padStart(7, '0');
+  }
 
   const correlativo = construirCorrelativo(datosFactura);
   const totalFactura = calcularTotal(datosFactura);

@@ -2310,7 +2310,7 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
               tipoDocumento: { type: 'integer', example: 1, description: '1 = Factura electrónica' },
               establecimiento: { type: 'string', example: '001' },
               punto: { type: 'string', example: '001' },
-              numero: { type: 'string', example: '0000060' },
+              numero: { type: 'string', example: '0000060', description: 'Número del documento (7 dígitos). OPCIONAL: si se omite, el sistema asigna automáticamente el siguiente número correlativo de la secuencia timbrado + tipo de documento + establecimiento + punto (recomendado). Si se envía, se usa tal cual (para integraciones que manejan su propia numeración).' },
               fecha: { type: 'string', format: 'date-time' },
               tipoEmision: { type: 'integer', example: 1 },
               tipoTransaccion: { type: 'integer', example: 1 },

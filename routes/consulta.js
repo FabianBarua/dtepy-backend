@@ -1,4 +1,5 @@
 const express = require('express');
+const { generarIdSifen } = require('../utils/idSifen');
 const router = express.Router();
 const crypto = require('crypto');
 const { verificarToken, verificarPermiso } = require('../middleware/auth');
@@ -29,7 +30,7 @@ router.get('/ruc/:ruc', async (req, res) => {
 
     try {
       const setApi = require('../services/setapi-wrapper');
-      const idConsulta = crypto.randomBytes(16).toString('hex');
+      const idConsulta = generarIdSifen();
       const ambiente = empresa.configuracionSifen?.modo || 'test';
       const cert = resolverCertificadoEmpresa(empresa);
 

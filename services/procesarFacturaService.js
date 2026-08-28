@@ -5,6 +5,7 @@
  */
 
 const Invoice = require('../models/Invoice');
+const { generarIdSifen } = require('../utils/idSifen');
 const Empresa = require('../models/Empresa');
 const certificadoService = require('./certificadoService');
 const path = require('path');
@@ -291,7 +292,7 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     // 10. Enviar a SET (modo normal)
     // ========================================
     console.log('📤 Enviando a SET...');
-    const idDocumento = crypto.randomBytes(16).toString('hex');
+    const idDocumento = generarIdSifen();
 
     let soapResponse = null;
     let errorEnvio = null;

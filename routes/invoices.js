@@ -1,4 +1,5 @@
 const express = require('express');
+const { generarIdSifen } = require('../utils/idSifen');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
@@ -140,7 +141,7 @@ router.get('/cdc/:cdc', async (req, res) => {
 
     try {
       const setApi = require('../services/setapi-wrapper');
-      const idConsulta = crypto.randomBytes(16).toString('hex');
+      const idConsulta = generarIdSifen();
 
       // Consultar a SET requiere firmar con un certificado real
       const empresa = await empresaParaConsultas(req);
@@ -212,7 +213,7 @@ router.get('/estado/:cdc', async (req, res) => {
         console.log('⚠️ No se encontró la empresa, usando configuración por defecto');
       }
 
-      const idConsulta = crypto.randomBytes(16).toString('hex');
+      const idConsulta = generarIdSifen();
       const ambiente = empresa?.configuracionSifen?.modo || 'test';
 
       if (!empresa) {
@@ -725,7 +726,7 @@ router.post('/:id/refresh-status', verificarPermiso('facturas:crear'), async (re
         console.log('⚠️ No se encontró la empresa, usando configuración por defecto');
       }
 
-      const idConsulta = crypto.randomBytes(16).toString('hex');
+      const idConsulta = generarIdSifen();
       const ambiente = empresa?.configuracionSifen?.modo || 'test';
 
       let certificateP12Path = path.join(__dirname, '..', 'certificados', 'p12', 'certificado.p12');

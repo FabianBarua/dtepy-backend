@@ -1,4 +1,5 @@
 const LoteEnvio = require('../models/LoteEnvio');
+const { generarIdSifen } = require('../utils/idSifen');
 const Invoice = require('../models/Invoice');
 const setApi = require('./setapi-wrapper');
 const OperacionLog = require('../models/OperationLog');
@@ -89,7 +90,7 @@ async function enviarLote(loteId) {
   const certificadoService = require('./certificadoService');
   const rutaCertificado = empresa.obtenerRutaCertificado();
   const contrasena = certificadoService.descifrarContrasena(empresa.certificado.contrasena);
-  const idDocumento = crypto.randomBytes(16).toString('hex');
+  const idDocumento = generarIdSifen();
 
   let soapResponse;
   try {
@@ -158,7 +159,7 @@ async function consultarResultadoLote(loteId) {
   const certificadoService = require('./certificadoService');
   const rutaCertificado = empresa.obtenerRutaCertificado();
   const contrasena = certificadoService.descifrarContrasena(empresa.certificado.contrasena);
-  const idDocumento = crypto.randomBytes(16).toString('hex');
+  const idDocumento = generarIdSifen();
 
   let soapResponse;
   try {

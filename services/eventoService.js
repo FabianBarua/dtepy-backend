@@ -9,6 +9,7 @@
  */
 
 const Evento = require('../models/Evento');
+const { generarIdSifen } = require('../utils/idSifen');
 const Invoice = require('../models/Invoice');
 const Empresa = require('../models/Empresa');
 const certificadoService = require('./certificadoService');
@@ -194,7 +195,7 @@ async function enviarEvento(params) {
     // ========================================
     // 4. Enviar a SET
     // ========================================
-    const idDocumento = crypto.randomBytes(16).toString('hex');
+    const idDocumento = generarIdSifen();
     const ambiente = empresa.configuracionSifen.modo || 'test';
 
     console.log('📤 Enviando evento a SET...');

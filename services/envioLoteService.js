@@ -1,5 +1,31 @@
 const LoteEnvio = require('../models/LoteEnvio');
 const { generarIdSifen } = require('../utils/idSifen');
+const { buscarEnRespuesta } = require('../utils/estadoSifen');
+
+/**
+ * Lee un campo de la respuesta de SET, sea XML crudo (string) u objeto
+ * parseado por setapi. Ignora el prefijo de namespace.
+ */
+function campoRespuesta(respuesta, nombre) {
+  if (respuesta && typeof respuesta === 'object') return buscarEnRespuesta(respuesta, nombre);
+  const m = String(respuesta || '').match(new RegExp('<(?:\\w+:)?' + nombre + '>([\\s\\S]*?)</(?:\\w+:)?' + nombre + '>'));
+  return m ? m[1].trim() : null;
+}
+
+/** Bloques de resultado por documento (gResProcLote/dProtDE) en el objeto parseado. */
+function bloquesResultadoLote(respuesta, bloques = [], profundidad = 0) {
+  if (respuesta === null || typeof respuesta !== 'object' || profundidad > 8) return bloques;
+  for (const [clave, valor] of Object.entries(respuesta)) {
+    const nombre = clave.includes(':') ? clave.split(':').pop() : clave;
+    if (nombre === 'gResProcLote' || nombre === 'dProtDE') {
+      if (Array.isArray(valor)) bloques.push(...valor);
+      else if (valor && typeof valor === 'object') bloques.push(valor);
+    } else {
+      bloquesResultadoLote(valor, bloques, profundidad + 1);
+    }
+  }
+  return bloques;
+}
 const Invoice = require('../models/Invoice');
 const setApi = require('./setapi-wrapper');
 const OperacionLog = require('../models/OperationLog');
@@ -107,16 +133,8 @@ async function enviarLote(loteId) {
     throw err;
   }
 
-  const loteIdMatch =
-    soapResponse.match(/<ns2:dProtConsLote>(.*?)<\/ns2:dProtConsLote>/) ||
-    soapResponse.match(/<dProtConsLote>(.*?)<\/dProtConsLote>/);
-
-  const codigoMatch =
-    soapResponse.match(/<ns2:dCodRes>(.*?)<\/ns2:dCodRes>/) ||
-    soapResponse.match(/<dCodRes>(.*?)<\/dCodRes>/);
-
-  const dProtConsLote = loteIdMatch ? loteIdMatch[1].trim() : null;
-  const codigo = codigoMatch ? codigoMatch[1].trim() : null;
+  const dProtConsLote = campoRespuesta(soapResponse, 'dProtConsLote');
+  const codigo = campoRespuesta(soapResponse, 'dCodRes');
 
   lote.dProtConsLote = dProtConsLote;
   lote.respuestaSifen = {
@@ -175,28 +193,20 @@ async function consultarResultadoLote(loteId) {
     return { lote, completado: false, mensaje: err.message };
   }
 
-  const codigoMatch =
-    soapResponse.match(/<ns2:dCodRes>(.*?)<\/ns2:dCodRes>/) ||
-    soapResponse.match(/<dCodRes>(.*?)<\/dCodRes>/);
-  const codigo = codigoMatch ? codigoMatch[1].trim() : null;
+  const codigo = campoRespuesta(soapResponse, 'dCodRes');
 
-  const resultadosMatch = soapResponse.match(/<ns2:dProtDE>.*?<\/ns2:dProtDE>/gs) ||
-                          soapResponse.match(/<dProtDE>.*?<\/dProtDE>/gs);
+  const bloques = (typeof soapResponse === 'string')
+    ? (soapResponse.match(/<ns2:dProtDE>[\s\S]*?<\/ns2:dProtDE>/g) ||
+       soapResponse.match(/<dProtDE>[\s\S]*?<\/dProtDE>/g) || [])
+    : bloquesResultadoLote(soapResponse);
 
-  if (resultadosMatch && resultadosMatch.length > 0) {
+  if (bloques.length > 0) {
     let todosResueltos = true;
-    for (let i = 0; i < resultadosMatch.length && i < lote.facturas.length; i++) {
-      const bloque = resultadosMatch[i];
-      const estResMatch = bloque.match(/<ns2:dEstRes>(.*?)<\/ns2:dEstRes>/) ||
-                          bloque.match(/<dEstRes>(.*?)<\/dEstRes>/);
-      const msgResMatch = bloque.match(/<ns2:dMsgRes>(.*?)<\/ns2:dMsgRes>/) ||
-                          bloque.match(/<dMsgRes>(.*?)<\/dMsgRes>/);
-      const cdcMatch = bloque.match(/<ns2:dCDCGestion>(.*?)<\/ns2:dCDCGestion>/) ||
-                       bloque.match(/<dCDCGestion>(.*?)<\/dCDCGestion>/);
-
-      const estRes = estResMatch ? estResMatch[1].trim() : null;
-      const msgRes = msgResMatch ? msgResMatch[1].trim() : null;
-      const cdcResp = cdcMatch ? cdcMatch[1].trim() : null;
+    for (let i = 0; i < bloques.length && i < lote.facturas.length; i++) {
+      const bloque = bloques[i];
+      const estRes = campoRespuesta(bloque, 'dEstRes');
+      const msgRes = campoRespuesta(bloque, 'dMsgRes');
+      const cdcResp = campoRespuesta(bloque, 'dCDCGestion');
 
       let estadoIndividual;
       let estadoVisual;

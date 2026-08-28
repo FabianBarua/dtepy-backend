@@ -18,7 +18,11 @@ RUN apt-get update \
         openjdk-21-jre-headless \
         fontconfig \
         fonts-dejavu-core \
+        libharfbuzz0b \
     && rm -rf /var/lib/apt/lists/*
+# libharfbuzz0b: libfontmanager.so de la JRE la carga al rasterizar texto;
+# sin ella JasperReports muere con UnsatisfiedLinkError (libharfbuzz.so.0)
+# y el KUDE no se genera (visto en produccion).
 
 WORKDIR /app
 

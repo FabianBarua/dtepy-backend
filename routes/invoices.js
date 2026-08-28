@@ -227,16 +227,7 @@ router.get('/estado/:cdc', async (req, res) => {
 
       const respuesta = await setApi.consulta(idConsulta, cdc, ambiente, cert.ruta, cert.contrasena);
 
-      const codigoRetornoMatch =
-        respuesta.match(/<ns2:dCodRes>(.*?)<\/ns2:dCodRes>/) ||
-        respuesta.match(/<dCodRes>(.*?)<\/dCodRes>/) ||
-        respuesta.match(/<codigoRetorno>(.*?)<\/codigoRetorno>/);
-
-      let codigoRetorno = null;
-
-      if (codigoRetornoMatch && codigoRetornoMatch[1]) {
-        codigoRetorno = codigoRetornoMatch[1].trim();
-      }
+      const codigoRetorno = extraerCodigoRetorno(respuesta);
 
       estadoSET = extraerEstadoDocumento(respuesta);
 

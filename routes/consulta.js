@@ -33,17 +33,21 @@ router.get('/ruc/:ruc', async (req, res) => {
       const ambiente = empresa.configuracionSifen?.modo || 'test';
       const cert = resolverCertificadoEmpresa(empresa);
 
-      const respuesta = await setApi.consultaRuc(idConsulta, ruc, ambiente, cert.ruta, cert.contrasena);
+      const respuesta = await setApi.consultaRUC(idConsulta, ruc, ambiente, cert.ruta, cert.contrasena);
 
       res.status(200).json({
         success: true,
         data: { ruc, encontrado: true, respuesta }
       });
     } catch (error) {
-      res.status(404).json({
+      // Un fallo acá puede ser "el RUC no existe" o un problema real
+      // (certificado, red, SET caído). Antes todo devolvía 404 y los
+      // errores de infraestructura quedaban enmascarados.
+      console.error('Error consultando RUC en SET:', error.message);
+      res.status(502).json({
         success: false,
-        error: 'RUC_NOT_FOUND',
-        message: 'RUC no encontrado o error en consulta',
+        error: 'CONSULTA_SET_ERROR',
+        message: `No se pudo consultar el RUC en SET: ${error.message}`,
         data: { ruc, encontrado: false }
       });
     }

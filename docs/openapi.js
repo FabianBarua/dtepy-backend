@@ -1310,24 +1310,14 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       get: {
         tags: ['Consultas SET'],
         summary: 'Consultar un RUC en SET',
-        description: 'Consulta el padrón de la SET para validar un RUC de cliente antes de facturarle. Usa el certificado de una empresa del alcance.',
-        parameters: [paramRuta('ruc', 'RUC a consultar')],
+        description: 'Consulta el padrón de la SET para validar un RUC de cliente antes de facturarle. Usa el certificado de una empresa del alcance. Acepta el RUC con o sin dígito verificador (SET lo exige sin DV; se normaliza automáticamente).',
+        parameters: [paramRuta('ruc', 'RUC a consultar, con o sin dígito verificador (ej: 80055783-2 o 80055783)')],
         responses: {
-          200: okJson('Datos del contribuyente', envuelto({
-            type: 'object',
-            properties: {
-              ruc: { type: 'string' },
-              encontrado: { type: 'boolean', example: true },
-              respuesta: {
-                type: 'object',
-                description: 'Respuesta SOAP de SET parseada (razón social, estado del contribuyente, etc.)',
-                additionalProperties: true
-              }
-            }
-          }, false)),
+          200: okJson('Contribuyente encontrado', envuelto(ref('ContribuyenteSet'))),
           400: respuestaError('RUC requerido, o no hay empresa con certificado activo para firmar la consulta'),
           401: NO_AUTORIZADO,
-          404: respuestaError('RUC no encontrado en SET')
+          404: respuestaError('SET respondió que el RUC no existe (RUC_NOT_FOUND, con el mensaje de SET)'),
+          502: respuestaError('No se pudo consultar a SET (transporte/certificado) o la respuesta tuvo una estructura inesperada')
         }
       }
     }
@@ -1876,6 +1866,20 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
           timestamp: { type: 'number', description: 'Epoch ms del último cambio de estado', example: 1787788748870 },
           error: { type: 'string', nullable: true, description: 'Motivo del fallo, si falló' },
           attempts: { type: 'integer', example: 1 }
+        }
+      },
+
+      ContribuyenteSet: {
+        type: 'object',
+        description: 'Resultado de la consulta de RUC, ya interpretado (sin claves SOAP ns2:)',
+        properties: {
+          ruc: { type: 'string', example: '80055783', description: 'RUC consultado, normalizado sin DV' },
+          encontrado: { type: 'boolean', example: true },
+          razonSocial: { type: 'string', nullable: true, example: 'KINGSTON CENTER SOCIEDAD ANONIMA' },
+          estado: { type: 'string', nullable: true, example: 'ACT', description: 'Código de estado del RUC en SET' },
+          estadoDescripcion: { type: 'string', nullable: true, example: 'ACTIVO' },
+          facturadorElectronico: { type: 'boolean', description: 'true si SET lo registra como facturador electrónico en ese ambiente' },
+          codigoSet: { type: 'string', nullable: true, example: '0502', description: '0502 = RUC encontrado' }
         }
       },
 

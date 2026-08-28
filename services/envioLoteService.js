@@ -273,6 +273,34 @@ async function enviarPendientes() {
   return resultados;
 }
 
+/**
+ * Envía los lotes en espera cuya factura más antigua ya esperó demasiado.
+ *
+ * El lote se auto-envía al llegar a 50 documentos; sin esto, con menos de
+ * 50 quedaba en_espera para siempre salvo envío manual — en producción una
+ * venta individual nunca llegaba a SET. El criterio es la EDAD del lote
+ * (createdAt): garantiza latencia máxima aunque sigan entrando facturas.
+ */
+async function enviarLotesConEspera(esperaMs) {
+  const limite = new Date(Date.now() - esperaMs);
+  const lotes = await LoteEnvio.find({
+    estado: 'en_espera',
+    count: { $gt: 0 },
+    createdAt: { $lte: limite }
+  });
+  const resultados = [];
+  for (const lote of lotes) {
+    try {
+      await enviarLote(lote._id);
+      resultados.push({ loteId: lote._id, count: lote.count, success: true });
+    } catch (err) {
+      // p. ej. carrera con un envío manual (estado ya no es en_espera)
+      resultados.push({ loteId: lote._id, success: false, error: err.message });
+    }
+  }
+  return resultados;
+}
+
 async function consultarPendientes() {
   const lotes = await LoteEnvio.find({ estado: { $in: ['enviado', 'procesando'] }, dProtConsLote: { $ne: null } });
   const resultados = [];
@@ -292,5 +320,6 @@ module.exports = {
   enviarLote,
   consultarResultadoLote,
   enviarPendientes,
+  enviarLotesConEspera,
   consultarPendientes
 };

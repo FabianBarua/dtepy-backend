@@ -218,13 +218,16 @@ exports.actualizar = async (req, res) => {
       // Validar CSC si se proporciona (debe ser 32 caracteres hexadecimales)
       if (configuracionSifen.csc) {
         const cscLimpio = configuracionSifen.csc.trim();
-        if (!/^[0-9A-F]{32}$/i.test(cscLimpio)) {
+        if (!/^[0-9A-Fa-f]{32}$/.test(cscLimpio)) {
           return res.status(400).json({
             success: false,
             error: 'CSC inválido. Debe ser 32 caracteres hexadecimales'
           });
         }
-        configuracionSifen.csc = cscLimpio.toUpperCase();
+        // OJO: el CSC es case-sensitive tal como lo entrega SET. Antes se
+        // hacía toUpperCase() y el hash del QR (SHA-256 sobre el CSC) nunca
+        // coincidía: SET rechazaba todo con "2501: hash del QR inválido".
+        configuracionSifen.csc = cscLimpio;
       }
       // Validar timbrado si se proporciona (debe ser 8 dígitos)
       if (configuracionSifen.timbrado) {

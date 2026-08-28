@@ -48,7 +48,8 @@ async function generarXMLEvento(params) {
     descripcion,
     rucEmisor,
     rucReceptor,
-    usuario
+    usuario,
+    dId
   } = params;
 
   // Generar ID único para el evento (numérico, hasta 10 dígitos)
@@ -99,26 +100,35 @@ async function generarXMLEvento(params) {
   // Schema XML 19: Evento_v150.xsd
   // El XML debe tener la estructura: rEnviEventoDe > dEvReg > gGroupGesEve > rGesEve > rEve
   // El nodo rEve es el que se firma digitalmente
+  // signXMLEvento (xmlsign) navega env:Envelope > env:Body > rEnviEventoDe >
+  // dEvReg > gGroupGesEve > rGesEve > rEve para firmar: el evento se genera
+  // YA envuelto en el sobre SOAP (y asi tambien se envia; setapi no envuelve).
   const xmlEvento = `<?xml version="1.0" encoding="UTF-8"?>
-<rEnviEventoDe xmlns="http://ekuatia.set.gov.py/sifen/xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dEvReg>
-    <gGroupGesEve>
-      <rGesEve xsi:schemaLocation="http://ekuatia.set.gov.py/sifen/xsd siRecepEvento_v150.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-        <rEve Id="${idEvento}">
-          <dFecFirma>${fechaEvento}</dFecFirma>
-          <dVerFor>${versionFormato}</dVerFor>
-          <dTiGDE>${codigoTipoEvento}</dTiGDE>
-          <gGroupTiEvt>
-            <rGeVeCan>
-              <Id>${cdc}</Id>
-              <mOtEve>${descripcion}</mOtEve>
-            </rGeVeCan>
-          </gGroupTiEvt>
-        </rEve>
-      </rGesEve>
-    </gGroupGesEve>
-  </dEvReg>
-</rEnviEventoDe>`;
+<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+  <env:Header/>
+  <env:Body>
+    <rEnviEventoDe xmlns="http://ekuatia.set.gov.py/sifen/xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <dId>${dId}</dId>
+      <dEvReg>
+        <gGroupGesEve>
+          <rGesEve xsi:schemaLocation="http://ekuatia.set.gov.py/sifen/xsd siRecepEvento_v150.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <rEve Id="${idEvento}">
+              <dFecFirma>${fechaEvento}</dFecFirma>
+              <dVerFor>${versionFormato}</dVerFor>
+              <dTiGDE>${codigoTipoEvento}</dTiGDE>
+              <gGroupTiEvt>
+                <rGeVeCan>
+                  <Id>${cdc}</Id>
+                  <mOtEve>${descripcion}</mOtEve>
+                </rGeVeCan>
+              </gGroupTiEvt>
+            </rEve>
+          </rGesEve>
+        </gGroupGesEve>
+      </dEvReg>
+    </rEnviEventoDe>
+  </env:Body>
+</env:Envelope>`;
 
   return xmlEvento;
 }
@@ -171,13 +181,16 @@ async function enviarEvento(params) {
     // ========================================
     // 2. Generar XML del evento
     // ========================================
+    const idDocumento = generarIdSifen();
+
     const xmlEvento = await generarXMLEvento({
       cdc: invoice.cdc,
       tipoEvento,
       descripcion,
       rucEmisor: empresa.ruc,
       rucReceptor: invoice.cliente?.ruc,
-      usuario
+      usuario,
+      dId: idDocumento
     });
 
     // ========================================
@@ -197,23 +210,13 @@ async function enviarEvento(params) {
     // ========================================
     // 4. Enviar a SET
     // ========================================
-    const idDocumento = generarIdSifen();
     const ambiente = empresa.configuracionSifen.modo || 'test';
-
-    // setapi.evento NO envuelve el XML ("ya viene con SoapData"): hay que
-    // mandar el sobre SOAP 1.2 con el dId como primer hijo de rEnviEventoDe,
-    // como exige el Manual Tecnico v150. La firma cubre solo rEve, asi que
-    // envolver despues de firmar no la invalida.
-    const cuerpoFirmado = xmlFirmado
-      .replace(/^<\?xml[^>]*\?>\s*/, '')
-      .replace(/<rEnviEventoDe([^>]*)>/, `<rEnviEventoDe$1><dId>${idDocumento}</dId>`);
-    const soapEvento = `<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope"><env:Header/><env:Body>${cuerpoFirmado}</env:Body></env:Envelope>`;
 
     console.log('📤 Enviando evento a SET...');
 
     const respuesta = await setApi.evento(
       idDocumento,
-      soapEvento,
+      xmlFirmado,
       ambiente,
       rutaCertificado,
       contrasena

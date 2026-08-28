@@ -40,7 +40,7 @@ const invoiceSchema = new mongoose.Schema({
   },
   estadoSifen: {
     type: String,
-    enum: ['recibido', 'procesando', 'enviado', 'aceptado', 'rechazado', 'error', 'encolado', 'observado'],
+    enum: ['recibido', 'procesando', 'enviado', 'aceptado', 'rechazado', 'error', 'encolado', 'observado', 'cancelado'],
     default: 'recibido'
   },
   fechaEnvio: {

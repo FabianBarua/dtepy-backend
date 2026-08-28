@@ -390,7 +390,7 @@ router.get('/:id', async (req, res) => {
     const xmlLink = invoice.xmlPath ? `${baseUrl}/api/invoices/${invoice._id}/download-xml` : null;
     const kudeLink = invoice.kudePath ? `${baseUrl}/api/invoices/${invoice._id}/download-pdf` : null;
 
-    const estadosFinales = ['aceptado', 'rechazado', 'error', 'observado'];
+    const estadosFinales = ['aceptado', 'rechazado', 'error', 'observado', 'cancelado'];
     const esEstadoFinal = estadosFinales.includes(invoice.estadoSifen);
 
     const recomendarRefresh = !esEstadoFinal && invoice.cdc;
@@ -517,7 +517,7 @@ router.post('/:id/retry', verificarPermiso('facturas:crear'), async (req, res) =
       });
     }
 
-    const estadosFinales = ['aceptado', 'observado'];
+    const estadosFinales = ['aceptado', 'observado', 'cancelado'];
     if (estadosFinales.includes(invoice.estadoSifen) && invoice.cdc) {
       return res.status(400).json({
         success: false,
@@ -679,7 +679,7 @@ router.post('/:id/refresh-status', verificarPermiso('facturas:crear'), async (re
 
     console.log(`📋 CDC encontrado: ${invoiceRecord.cdc}, Estado actual: ${invoiceRecord.estadoSifen}`);
 
-    const estadosFinales = ['aceptado', 'rechazado', 'error', 'observado'];
+    const estadosFinales = ['aceptado', 'rechazado', 'error', 'observado', 'cancelado'];
     const esEstadoFinal = estadosFinales.includes(invoiceRecord.estadoSifen);
 
     if (esEstadoFinal) {

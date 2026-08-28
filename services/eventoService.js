@@ -37,99 +37,57 @@ const TIPOS_EVENTO = {
 };
 
 /**
- * Genera el XML de un evento
+ * Genera el XML de un evento usando el generador OFICIAL de xmlgen.
+ *
+ * IMPORTANTE: no armar este XML a mano. SET rechazaba con "0160 XML mal
+ * formado" un XML artesanal estructuralmente idéntico; el formato exacto que
+ * SET acepta es el que produce xmlgen (rEve Id="1", xsi:schemaLocation con
+ * espacio en gGroupGesEve, sobre SOAP con dId incluido). Verificado en
+ * producción: evento de cancelación aprobado con dCodRes 0600.
+ *
+ * El XML retornado ya viene envuelto en el sobre SOAP: signXMLEvento navega
+ * env:Envelope > env:Body > ... > rEve para firmar, y setapi.evento() lo
+ * envía tal cual (no envuelve).
+ *
  * @param {Object} params - Parámetros del evento
- * @returns {Promise<string>} XML del evento sin firmar
+ * @returns {Promise<string>} XML del evento sin firmar (con sobre SOAP)
  */
 async function generarXMLEvento(params) {
-  const {
+  const { cdc, tipoEvento, descripcion, dId, datosEvento } = params;
+
+  // Fecha de firma en hora de Paraguay explícita (independiente del TZ del
+  // proceso): xmlgen la re-formatea con getHours() locales, y un string sin
+  // zona horaria se parsea/re-formatea sin conversión.
+  const fechaFirmaDigital = new Date()
+    .toLocaleString('sv-SE', { timeZone: 'America/Asuncion' })
+    .replace(' ', 'T');
+
+  const paramsXmlgen = { version: 150 };
+  const datos = {
     cdc,
-    tipoEvento,
-    descripcion,
-    rucEmisor,
-    rucReceptor,
-    usuario,
-    dId
-  } = params;
+    motivo: descripcion,
+    fechaFirmaDigital,
+    ...(datosEvento || {})
+  };
 
-  // Generar ID único para el evento (numérico, hasta 10 dígitos)
-  const idEvento = Math.floor(Math.random() * 1000000000).toString();
-
-  // Fecha del evento en hora LOCAL (formato SIFEN: YYYY-MM-DDTHH:MM:SS).
-  // toISOString() da UTC y SET rechaza la firma "adelantada" (el contenedor
-  // corre en America/Asuncion).
-  const fechaEvento = new Date().toLocaleString('sv-SE').replace(' ', 'T');
-
-  // Versión del formato según Manual Técnico v150
-  const versionFormato = '150';
-
-  // Mapear tipo de evento a código numérico según Manual Técnico v150
-  // Eventos del Emisor: 1=Cancelación, 2=Inutilización
-  // Eventos del Receptor: 10=Acuse, 11=Conformidad, 12=Disconformidad, 13=Desconocimiento
-  let codigoTipoEvento = '12'; // Default: Disconformidad
-  let nombreTipoEvento = descripcion;
-
-  switch(tipoEvento) {
+  switch (tipoEvento) {
     case 'cancelacion':
-      codigoTipoEvento = '1';
-      nombreTipoEvento = 'Cancelación de DTE';
-      break;
-    case 'devolucion_ajuste':
-      codigoTipoEvento = '2';
-      nombreTipoEvento = 'Devolución/Ajuste';
-      break;
+      return FacturaElectronicaPY.generateXMLEventoCancelacion(dId, paramsXmlgen, datos);
     case 'conformidad':
-      codigoTipoEvento = '11';
-      nombreTipoEvento = 'Conformidad del DE';
-      break;
+      return FacturaElectronicaPY.generateXMLEventoConformidad(dId, paramsXmlgen, datos);
     case 'disconformidad':
-      codigoTipoEvento = '12';
-      nombreTipoEvento = 'Disconformidad del DE';
-      break;
+      return FacturaElectronicaPY.generateXMLEventoDisconformidad(dId, paramsXmlgen, datos);
     case 'desconocimiento':
-      codigoTipoEvento = '13';
-      nombreTipoEvento = 'Desconocimiento del DE';
-      break;
+      return FacturaElectronicaPY.generateXMLEventoDesconocimiento(dId, paramsXmlgen, datos);
     case 'notificacion_recepcion':
-      codigoTipoEvento = '10';
-      nombreTipoEvento = 'Acuse del DE';
-      break;
+      return FacturaElectronicaPY.generateXMLEventoNotificacion(dId, paramsXmlgen, datos);
+    case 'devolucion_ajuste':
+      // xmlgen no implementa devolución/ajuste como evento; la devolución se
+      // documenta con una Nota de Crédito electrónica, no con un evento.
+      throw new Error('La devolución/ajuste se realiza con Nota de Crédito electrónica, no con un evento SIFEN');
+    default:
+      throw new Error(`Tipo de evento no soportado: ${tipoEvento}`);
   }
-
-  // Estructura del evento según Manual Técnico v150 - Sección 11.5
-  // Schema XML 19: Evento_v150.xsd
-  // El XML debe tener la estructura: rEnviEventoDe > dEvReg > gGroupGesEve > rGesEve > rEve
-  // El nodo rEve es el que se firma digitalmente
-  // signXMLEvento (xmlsign) navega env:Envelope > env:Body > rEnviEventoDe >
-  // dEvReg > gGroupGesEve > rGesEve > rEve para firmar: el evento se genera
-  // YA envuelto en el sobre SOAP (y asi tambien se envia; setapi no envuelve).
-  const xmlEvento = `<?xml version="1.0" encoding="UTF-8"?>
-<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
-  <env:Header/>
-  <env:Body>
-    <rEnviEventoDe xmlns="http://ekuatia.set.gov.py/sifen/xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-      <dId>${dId}</dId>
-      <dEvReg>
-        <gGroupGesEve>
-          <rGesEve xsi:schemaLocation="http://ekuatia.set.gov.py/sifen/xsd siRecepEvento_v150.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-            <rEve Id="${idEvento}">
-              <dFecFirma>${fechaEvento}</dFecFirma>
-              <dVerFor>${versionFormato}</dVerFor>
-              <gGroupTiEvt>
-                <rGeVeCan>
-                  <Id>${cdc}</Id>
-                  <mOtEve>${descripcion}</mOtEve>
-                </rGeVeCan>
-              </gGroupTiEvt>
-            </rEve>
-          </rGesEve>
-        </gGroupGesEve>
-      </dEvReg>
-    </rEnviEventoDe>
-  </env:Body>
-</env:Envelope>`;
-
-  return xmlEvento;
 }
 
 /**
@@ -186,10 +144,8 @@ async function enviarEvento(params) {
       cdc: invoice.cdc,
       tipoEvento,
       descripcion,
-      rucEmisor: empresa.ruc,
-      rucReceptor: invoice.cliente?.ruc,
-      usuario,
-      dId: idDocumento
+      dId: idDocumento,
+      datosEvento: params.datosEvento
     });
 
     // ========================================
@@ -239,8 +195,13 @@ async function enviarEvento(params) {
     const idEventoSET =
       (typeof respuesta === 'object' ? buscarEnRespuesta(respuesta, 'dProtAut') : null);
 
-    // 0600/0601 = evento registrado segun el Manual Tecnico v150
-    const registrado = estadoResultado === 'Aprobado' || codigoRetorno === '0600' || codigoRetorno === '0601';
+    // 0600/0601 = evento registrado segun el Manual Tecnico v150.
+    // 4155 = "El CDC del DTE ya ha sido cancelado con anterioridad": para una
+    // cancelación el resultado es idempotente (el DTE está cancelado), se
+    // trata como registrado para que la factura quede marcada localmente.
+    const yaCancelado = tipoEvento === 'cancelacion' && codigoRetorno === '4155';
+    const registrado = estadoResultado === 'Aprobado' || codigoRetorno === '0600' ||
+      codigoRetorno === '0601' || yaCancelado;
     const estadoEvento = registrado ? 'registrado' : 'rechazado';
 
     console.log(`📥 SET respondio al evento: ${codigoRetorno ?? 'sin codigo'} (${estadoEvento}) - ${mensajeRetorno}`);
@@ -270,7 +231,18 @@ async function enviarEvento(params) {
     console.log(`✅ Evento guardado en BD: ${evento._id}`);
 
     // ========================================
-    // 7. Retornar resultado
+    // 7. Actualizar estado de la factura
+    // ========================================
+    // Una cancelación registrada en SET anula el DTE: se refleja en la
+    // factura local para que no compute en la contabilidad.
+    if (registrado && tipoEvento === 'cancelacion') {
+      invoice.estadoSifen = 'cancelado';
+      await invoice.save();
+      console.log(`🚫 Factura ${invoice.correlativo} marcada como cancelada`);
+    }
+
+    // ========================================
+    // 8. Retornar resultado
     // ========================================
     return {
       success: true,

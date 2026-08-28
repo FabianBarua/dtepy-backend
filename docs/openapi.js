@@ -1417,8 +1417,8 @@ emitir una Nota de Crédito. La cancelación es **irreversible**.
       // ------------------------------ enums ------------------------------
       EstadoSifen: {
         type: 'string',
-        enum: ['recibido', 'encolado', 'procesando', 'enviado', 'aceptado', 'observado', 'rechazado', 'error'],
-        description: 'Estado del documento en SIFEN. aceptado/observado/rechazado/error son finales.'
+        enum: ['recibido', 'encolado', 'procesando', 'enviado', 'aceptado', 'observado', 'rechazado', 'error', 'cancelado'],
+        description: 'Estado del documento en SIFEN. aceptado/observado/rechazado/error son finales; cancelado indica DTE anulado por evento de cancelación registrado en SET.'
       },
 
       Proceso: {

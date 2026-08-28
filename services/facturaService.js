@@ -201,6 +201,7 @@ async function crearFactura(datosFactura) {
     }
 
     facturaExistente.datosFactura = datosFactura;
+    facturaExistente.correlativo = correlativo;  // el reintento puede cambiar est/punto
     facturaExistente.estadoSifen = 'encolado';
     facturaExistente.proceso = null;
     facturaExistente.fechaCreacion = new Date();

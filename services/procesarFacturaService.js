@@ -190,7 +190,12 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
           const Invoice = require('../models/Invoice');
           const updateData = {};
           if (digestValueFirma) updateData.digestValue = digestValueFirma;
-          if (cdcFirma) updateData.cdc = cdcFirma;
+          if (cdcFirma) {
+            updateData.cdc = cdcFirma;
+            // El CDC es la verdad sobre est-punto-numero del DTE: se refleja
+            // en el correlativo local (un reintento pudo cambiar el punto).
+            updateData.correlativo = `${cdcFirma.slice(11, 14)}-${cdcFirma.slice(14, 17)}-${cdcFirma.slice(17, 24)}`;
+          }
 
           if (Object.keys(updateData).length > 0) {
             await Invoice.findByIdAndUpdate(invoiceId, {

@@ -24,6 +24,12 @@ RUN apt-get update \
 # sin ella JasperReports muere con UnsatisfiedLinkError (libharfbuzz.so.0)
 # y el KUDE no se genera (visto en produccion).
 
+# SIFEN valida las horas contra la hora paraguaya: con el contenedor en UTC
+# la firma queda 3h "en el futuro" y SET rechaza con 1004 (fecha de firma
+# adelantada). tzdata + TZ alinean el reloj del proceso.
+RUN apt-get update     && apt-get install -y --no-install-recommends tzdata     && rm -rf /var/lib/apt/lists/*
+ENV TZ=America/Asuncion
+
 WORKDIR /app
 
 # --- Dependencias (capa cacheada aparte del código) ---

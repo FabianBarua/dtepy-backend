@@ -118,9 +118,9 @@ async function enviarEvento(params) {
       throw new Error('La factura no tiene CDC. Debe estar aprobada por SET para enviar eventos.');
     }
 
-    // Validar que la factura esté aprobada (estado final)
-    if (invoice.estadoSifen !== 'aceptado') {
-      throw new Error(`No se puede enviar evento: La factura está en estado "${invoice.estadoSifen}". Debe estar "aceptado".`);
+    // Validar que la factura esté aprobada por SET (con o sin observación)
+    if (!['aceptado', 'observado'].includes(invoice.estadoSifen)) {
+      throw new Error(`No se puede enviar evento: La factura está en estado "${invoice.estadoSifen}". Debe estar "aceptado" u "observado".`);
     }
 
     const empresa = await Empresa.findById(invoice.empresaId);

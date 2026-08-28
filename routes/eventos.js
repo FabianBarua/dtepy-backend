@@ -68,12 +68,20 @@ router.post('/enviar', verificarPermiso('facturas:crear'), async (req, res) => {
     // Validar tipo de evento
     const tiposValidos = [
       'cancelacion',
-      'devolucion_ajuste',
       'conformidad',
       'disconformidad',
       'desconocimiento',
       'notificacion_recepcion'
     ];
+
+    if (tipoEvento === 'devolucion_ajuste') {
+      return res.status(400).json({
+        success: false,
+        error: 'EVENTO_TIPO_INVALIDO',
+        message: 'La devolución/ajuste no es un evento SIFEN: se documenta emitiendo una Nota de Crédito electrónica',
+        tiposValidos
+      });
+    }
 
     if (!tiposValidos.includes(tipoEvento)) {
       return res.status(400).json({
@@ -97,13 +105,13 @@ router.post('/enviar', verificarPermiso('facturas:crear'), async (req, res) => {
 
     // Validaciones específicas por tipo de evento
     if (tipoEvento === 'cancelacion') {
-      // Solo el emisor, sobre un DTE aprobado, y dentro del plazo del
-      // Manual Técnico v150: 48h para facturas, 168h para el resto.
-      if (invoice.estadoSifen !== 'aceptado') {
+      // Solo el emisor, sobre un DTE aprobado (con o sin observación), y
+      // dentro del plazo del Manual Técnico v150: 48h facturas, 168h el resto.
+      if (!['aceptado', 'observado'].includes(invoice.estadoSifen)) {
         return res.status(400).json({
           success: false,
           error: 'EVENTO_CANCELACION_INVALIDA',
-          message: 'Solo se puede cancelar facturas aprobadas por SET'
+          message: 'Solo se puede cancelar facturas aprobadas por SET (estado aceptado u observado)'
         });
       }
 
@@ -130,6 +138,7 @@ router.post('/enviar', verificarPermiso('facturas:crear'), async (req, res) => {
       invoiceId,
       tipoEvento,
       descripcion,
+      datosEvento: req.body.datosEvento,
       usuario: usuario || {
         documentoNumero: req.user?.documento || '0',
         nombre: req.user?.nombre || 'Sistema'

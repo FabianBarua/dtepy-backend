@@ -398,8 +398,12 @@ async function generarKUDE(xmlContenido, cdc, correlativo, fechaCreacion, datosF
                                   String(fechaCreacion.getMonth() + 1).padStart(2, '0'), '/');
                                   
     const env = empresa.configuracionSifen.modo;
+    // Convención de la plantilla jasper: "0" imprime "Ambiente NO CONECTADO
+    // a la SET" (contingencia), "1" imprime "Ambiente de PRUEBA", cualquier
+    // otro valor no imprime leyenda (producción normal). Antes producción
+    // mandaba "0" y todos los KUDE salían con la leyenda de contingencia.
     const jsonParam = {
-      ambiente: env == "produccion" ? "0" : "1",
+      ambiente: env == "produccion" ? "2" : "1",
       LOGO_URL: empresa?.configuracionSifen?.urlLogo || "https://res.cloudinary.com/dficj0aam/image/upload/v1775702075/invoice_axiuol.png",
       active: true,
       template: datosFactura?.data?.templateFactura || datosFactura?.templateFactura || "normal"

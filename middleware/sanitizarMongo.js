@@ -25,8 +25,21 @@ function limpiar(objeto, visitados = new WeakSet()) {
   for (const clave of Object.keys(objeto)) {
     if (clave.startsWith('$')) {
       delete objeto[clave];
-    } else {
-      limpiar(objeto[clave], visitados);
+      continue;
+    }
+
+    const valor = objeto[clave];
+    const esObjetoPlano = valor !== null && typeof valor === 'object' && !Array.isArray(valor);
+    const teniaClaves = esObjetoPlano && Object.keys(valor).length > 0;
+
+    limpiar(valor, visitados);
+
+    // Si el valor era un objeto compuesto SOLO por operadores (ej:
+    // ?estado[$ne]=x -> { estado: { $ne: 'x' } }), tras limpiarlo queda {}.
+    // Dejarlo asi rompe el cast de Mongoose (500): se descarta el campo
+    // entero, que equivale a ignorar el filtro inyectado.
+    if (teniaClaves && Object.keys(valor).length === 0) {
+      delete objeto[clave];
     }
   }
   return objeto;

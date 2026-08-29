@@ -484,6 +484,31 @@ Dto. 2063/2024)**: venta a turista no residente exenta de IVA — item con
 \`ivaTipo: 3\`, cliente con pasaporte (\`documentoTipo: 2\`), \`tipoOperacion: 4\`
 (B2F) y país de residencia extranjero, y \`param.tipoRegimen: 1\`. Requiere
 estar inscripto en el registro RTC de la DNIT.
+
+---
+
+## Flow de integración recomendado
+
+1. \`POST /api/facturar/crear\` con el payload mínimo (\`param.ruc\` +
+   \`data.cliente\` + \`data.items\` + fecha/condición) → \`202 { facturaId,
+   correlativo }\` en milisegundos. La numeración, el emisor, la sucursal y el
+   canal de envío salen de la configuración de la empresa.
+2. El sistema firma, agrupa en lote, envía a SET y consulta el resultado
+   **solo** (≈ 90 s de venta a aprobada, sin intervención).
+3. Enterarse del resultado, a elección:
+   - **Webhook** (recomendado): configurar \`notificaciones.webhookUrl\` en la
+     empresa — se recibe un POST firmado al llegar a estado final.
+   - **Polling**: \`GET /api/factura/estado/:facturaId\` cada 10-15 s hasta
+     \`estado: "aceptado"\` (con \`proceso: "Completado"\` el PDF ya existe).
+4. Entregar el KUDE al cliente:
+   - **Email automático**: activar \`notificaciones.emailAutomatico\` (el
+     sistema manda PDF + XML a \`data.cliente.email\` al aprobarse), o
+   - descargar \`GET /api/invoices/:id/download-pdf\` y adjuntarlo en el email
+     propio de confirmación de compra.
+5. Si SET rechaza: corregir según \`mensajeRetorno\` y re-POSTear el mismo
+   payload con el **mismo** \`data.numero\` (reintento de la misma factura).
+6. Anulación (hasta 48 h): \`POST /api/eventos/enviar\` con
+   \`tipoEvento: "cancelacion"\`.
 `.trim(),
         requestBody: {
           required: true,
@@ -1540,6 +1565,26 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
           502: respuestaError('No se pudo consultar a SET (transporte/certificado) o la respuesta tuvo una estructura inesperada')
         }
       }
+    },
+
+    '/api/utils/webhook-echo': {
+      post: {
+        tags: ['Utilidades'],
+        summary: 'Receptor de prueba de webhooks (echo)',
+        security: [],
+        description: 'Receptor de prueba para verificar la integración de webhooks sin backend propio: configurá `notificaciones.webhookUrl` de la empresa apuntando acá, emití una factura, y consultá con el GET lo que llegó (payload y headers de firma). Guarda los últimos 10 en memoria (se pierden al reiniciar). El POST es público, como cualquier receptor de webhooks.',
+        requestBody: { required: false, content: { 'application/json': { schema: { type: 'object' } } } },
+        responses: { 200: okJson('Recibido', { type: 'object' }) }
+      },
+      get: {
+        tags: ['Utilidades'],
+        summary: 'Ver los webhooks recibidos por el echo',
+        description: 'Devuelve los últimos webhooks recibidos por el receptor de prueba: `{ recibidoEn, headers: {x-dte-evento, x-dte-firma, user-agent}, body }`. Para verificar la firma: HMAC-SHA256 hex del body (JSON serializado) con el webhookSecret de la empresa.',
+        responses: {
+          200: okJson('Listado', { type: 'object', properties: { count: { type: 'integer' }, recibidos: { type: 'array', items: { type: 'object' } } } }),
+          401: NO_AUTORIZADO
+        }
+      }
     }
   },
 
@@ -2319,6 +2364,26 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
                 items: { type: 'string', pattern: '^[A-Z]{3}$' },
                 default: ['PYG', 'USD'],
                 description: 'Política contable: monedas en las que la empresa emite. Una factura en otra moneda se rechaza con 400 MONEDA_NO_PERMITIDA (SIFEN admite cualquier ISO 4217, la restricción es de la empresa).'
+              }
+            }
+          },
+          notificaciones: {
+            type: 'object',
+            description: 'Notificaciones al integrador cuando una factura llega a estado final (aceptado/observado/rechazado/error).',
+            properties: {
+              webhookUrl: {
+                type: 'string',
+                format: 'uri',
+                description: 'URL que recibe un POST JSON `{evento: "factura.estado_final", timestamp, factura: {id, correlativo, estado, cdc, codigoRetorno, mensajeRetorno, total, cliente}, links: {pdf, xml}}`. Headers: `X-DTE-Evento` y `X-DTE-Firma` (HMAC-SHA256 hex del body con webhookSecret — verificála para autenticar el origen). 3 intentos (0s/10s/60s, timeout 10s); se considera entregado con cualquier 2xx. Nota: el link del PDF puede tardar unos segundos más que el webhook — si da 404, reintentar a los 5s. String vacío = desactivar. Para probar sin backend propio: apuntarla a /api/utils/webhook-echo.'
+              },
+              webhookSecret: {
+                type: 'string',
+                description: 'Secreto con el que se firma el webhook. Si se activa webhookUrl sin secreto, el sistema genera uno (visible en GET /api/empresas).'
+              },
+              emailAutomatico: {
+                type: 'boolean',
+                default: false,
+                description: 'Al aprobarse la factura, envía automáticamente el KUDE (PDF) + XML al email del cliente (data.cliente.email). Requiere SMTP configurado en el servidor: variables de entorno SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_FROM y SMTP_SEGURO=true si el puerto es 465.'
               }
             }
           },

@@ -234,11 +234,16 @@ async function consultarResultadoLote(loteId) {
 
       lote.facturas[i].estadoIndividual = estadoIndividual;
 
-      Invoice.findByIdAndUpdate(lote.facturas[i].facturaId, {
+      const facturaIdNotificar = lote.facturas[i].facturaId;
+      Invoice.findByIdAndUpdate(facturaIdNotificar, {
         estadoSifen: estadoIndividual,
         estadoVisual: estadoVisual,
         mensajeRetorno: msgRes,
         codigoRetorno: codRes
+      }).then(() => {
+        // estado final alcanzado: webhook + email del KUDE (fire-and-forget)
+        const { notificarFacturaFinal } = require('./notificacionService');
+        notificarFacturaFinal(facturaIdNotificar);
       }).catch(err => console.warn('⚠️ No se pudo actualizar factura del lote:', err.message));
     }
 

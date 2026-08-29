@@ -22,6 +22,30 @@ function normalizarEstablecimientos(establecimientos) {
 }
 
 /**
+ * Valida la configuración de notificaciones. Devuelve mensaje de error o
+ * null; normaliza el objeto en el lugar (genera webhookSecret si falta).
+ */
+function validarNotificaciones(notificaciones) {
+  if (!notificaciones) return null;
+  if (notificaciones.webhookUrl === '' || notificaciones.webhookUrl === null) {
+    notificaciones.webhookUrl = undefined;   // vacío = desactivar webhook
+  } else if (notificaciones.webhookUrl !== undefined) {
+    if (!/^https?:\/\/.+/i.test(notificaciones.webhookUrl)) {
+      return 'webhookUrl inválida: debe ser una URL http(s)';
+    }
+    // si activan webhook sin secreto, se genera uno (para la firma HMAC)
+    if (notificaciones.webhookSecret === undefined || notificaciones.webhookSecret === '') {
+      const crypto = require('crypto');
+      notificaciones.webhookSecret = crypto.randomBytes(24).toString('hex');
+    }
+  }
+  if (notificaciones.emailAutomatico !== undefined && typeof notificaciones.emailAutomatico !== 'boolean') {
+    return 'emailAutomatico debe ser true o false';
+  }
+  return null;
+}
+
+/**
  * Valida los datos de emisor configurables de la empresa. Devuelve el
  * mensaje de error o null si todo está bien.
  */
@@ -168,6 +192,7 @@ exports.crear = async (req, res) => {
       tipoRegimen,
       actividadesEconomicas,
       establecimientos,
+      notificaciones,
       direccion,
       telefono,
       email
@@ -184,6 +209,10 @@ exports.crear = async (req, res) => {
     const errorEmisor = validarDatosEmisor({ configuracionSifen, actividadesEconomicas, establecimientos });
     if (errorEmisor) {
       return res.status(400).json({ success: false, error: errorEmisor });
+    }
+    const errorNotif = validarNotificaciones(notificaciones);
+    if (errorNotif) {
+      return res.status(400).json({ success: false, error: errorNotif });
     }
 
     // Limpiar RUC (eliminar guiones y otros caracteres no numéricos)
@@ -208,6 +237,7 @@ exports.crear = async (req, res) => {
       tipoRegimen,
       actividadesEconomicas,
       establecimientos: normalizarEstablecimientos(establecimientos),
+      notificaciones,
       direccion,
       telefono,
       email,
@@ -250,6 +280,7 @@ exports.actualizar = async (req, res) => {
       tipoRegimen,
       actividadesEconomicas,
       establecimientos,
+      notificaciones,
       direccion,
       telefono,
       email,
@@ -259,6 +290,10 @@ exports.actualizar = async (req, res) => {
     const errorEmisor = validarDatosEmisor({ configuracionSifen, actividadesEconomicas, establecimientos });
     if (errorEmisor) {
       return res.status(400).json({ success: false, error: errorEmisor });
+    }
+    const errorNotif = validarNotificaciones(notificaciones);
+    if (errorNotif) {
+      return res.status(400).json({ success: false, error: errorNotif });
     }
 
     const empresa = await Empresa.findOne({
@@ -350,6 +385,12 @@ exports.actualizar = async (req, res) => {
       empresa.configuracionSifen = {
         ...empresa.configuracionSifen,
         ...configuracionSifen
+      };
+    }
+    if (notificaciones !== undefined) {
+      empresa.notificaciones = {
+        ...(empresa.notificaciones?.toObject ? empresa.notificaciones.toObject() : empresa.notificaciones),
+        ...notificaciones
       };
     }
     if (tipoContribuyente !== undefined) empresa.tipoContribuyente = tipoContribuyente;

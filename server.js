@@ -86,6 +86,7 @@ const facturaRoutes = require('./routes/factura');
 const consultaRoutes = require('./routes/consulta');
 const logsRoutes = require('./routes/logs');
 const cotizacionesRoutes = require('./routes/cotizaciones');
+const utilidadesRoutes = require('./routes/utilidades');
 
 // Usar rutas
 app.use('/api/stats', statsRoutes);
@@ -99,6 +100,7 @@ app.use('/api/factura', facturaRoutes);
 app.use('/api/consulta', consultaRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/cotizaciones', cotizacionesRoutes);
+app.use('/api/utils', utilidadesRoutes);
 
 // Rutas de autenticación (públicas)
 app.post('/api/auth/login', limiteLogin, authController.login);

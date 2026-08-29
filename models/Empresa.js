@@ -130,6 +130,25 @@ const empresaSchema = new mongoose.Schema({
     }
   },
   
+  // Notificaciones al integrador cuando una factura llega a estado final
+  notificaciones: {
+    // URL que recibe un POST firmado (X-DTE-Firma: HMAC-SHA256 del body)
+    webhookUrl: {
+      type: String,
+      trim: true
+    },
+    // Secreto para firmar el webhook (el integrador verifica la firma)
+    webhookSecret: {
+      type: String
+    },
+    // Enviar el KUDE (PDF) + XML por email al cliente al aprobarse
+    // (requiere SMTP_* configurado en el entorno del servidor)
+    emailAutomatico: {
+      type: Boolean,
+      default: false
+    }
+  },
+
   // Certificado digital (solo metadatos, archivo en filesystem)
   certificado: {
     nombreArchivo: String,

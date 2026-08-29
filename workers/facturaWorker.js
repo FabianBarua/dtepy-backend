@@ -172,6 +172,14 @@ facturaQueue.process('generar-factura', async (job) => {
     } else {
       console.log(`📋 [WORKER] Factura ${facturaId} ${resultado.estado} - CDC: ${resultado.cdc}`);
     }
+
+    // Canal sync (normal): el estado final se conoce acá mismo. Webhook +
+    // email del KUDE, fire-and-forget. (En el canal de lotes lo dispara
+    // envioLoteService cuando SET resuelve el lote.)
+    if (['aceptado', 'observado', 'rechazado', 'error'].includes(resultado.estado)) {
+      const { notificarFacturaFinal } = require('../services/notificacionService');
+      notificarFacturaFinal(facturaId);
+    }
     
     await job.progress(100);
     

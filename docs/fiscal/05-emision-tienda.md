@@ -67,12 +67,14 @@ regenerar el catálogo de la tienda:
 - Precios de la tienda son **sin IVA** → las líneas gravadas van ×1.1
   (SIFEN espera precios IVA incluido); exentas RTC van con `ivaTipo 3`.
 - **Recargo del gateway de pago: sin línea propia.** La tasa del medio de
-  pago se **distribuye proporcionalmente en el precio de cada ítem**
-  (envío incluido), escalando al total efectivamente cobrado — cada línea
-  refleja lo pagado por ella y la suma cierra exacta. La observación lo
-  declara ("Precios incluyen recargo del medio de pago…"). Una comisión
-  negativa (descuento por medio de pago) sí va como `descuentoGlobal`
-  (SIFEN no acepta líneas negativas).
+  pago se **distribuye proporcionalmente en el precio de los productos**,
+  escalando al total efectivamente cobrado — cada línea refleja lo pagado
+  por ella y la suma cierra exacta. El **envío queda fuera del reparto**:
+  figura como línea propia con su monto exacto solo cuando la orden lo
+  cobra (envío gratis = sin línea), y el ajuste de redondeo tampoco lo
+  toca. La observación lo declara ("Precios de los productos incluyen
+  recargo del medio de pago…"). Una comisión negativa (descuento por medio
+  de pago) sí va como `descuentoGlobal` (SIFEN no acepta líneas negativas).
 - Leyenda en `observacion`: país real del turista + declaración de no
   residencia (RTC B2C) o "Venta entre Contribuyentes RTC, exenta de IVA
   (Art. 10)" (B2B entre inscriptos).

@@ -87,6 +87,7 @@ const consultaRoutes = require('./routes/consulta');
 const logsRoutes = require('./routes/logs');
 const cotizacionesRoutes = require('./routes/cotizaciones');
 const utilidadesRoutes = require('./routes/utilidades');
+const smtpProviderRoutes = require('./routes/smtpProviders');
 
 // Usar rutas
 app.use('/api/stats', statsRoutes);
@@ -101,6 +102,7 @@ app.use('/api/consulta', consultaRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/cotizaciones', cotizacionesRoutes);
 app.use('/api/utils', utilidadesRoutes);
+app.use('/api/smtp-providers', smtpProviderRoutes);
 
 // Rutas de autenticación (públicas)
 app.post('/api/auth/login', limiteLogin, authController.login);

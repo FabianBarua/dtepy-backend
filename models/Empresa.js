@@ -141,11 +141,18 @@ const empresaSchema = new mongoose.Schema({
     webhookSecret: {
       type: String
     },
-    // Enviar el KUDE (PDF) + XML por email al cliente al aprobarse
-    // (requiere SMTP_* configurado en el entorno del servidor)
+    // Enviar el KUDE (PDF) + XML por email al cliente al aprobarse.
+    // Usa el proveedor SMTP seleccionado (smtpProviderId); si no hay,
+    // cae a las variables de entorno SMTP_* del servidor.
     emailAutomatico: {
       type: Boolean,
       default: false
+    },
+    // Proveedor SMTP con el que se envían los emails de esta empresa
+    smtpProviderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'SmtpProvider',
+      default: null
     }
   },
 

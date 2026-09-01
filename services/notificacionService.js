@@ -7,7 +7,9 @@
  *
  * 2. EMAIL AUTOMÁTICO: si empresa.notificaciones.emailAutomatico está activo
  *    y la factura fue aprobada, se envía el KUDE (PDF) + XML al email del
- *    cliente. Requiere SMTP configurado por variables de entorno:
+ *    cliente. Usa el proveedor SMTP seleccionado en la empresa
+ *    (notificaciones.smtpProviderId, colección smtpproviders); si la empresa
+ *    no tiene proveedor asignado, cae a las variables de entorno:
  *    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
  *    (SMTP_SEGURO=true para puerto 465).
  *
@@ -22,22 +24,67 @@ const path = require('path');
 const API_URL_PUBLICA = process.env.API_URL_PUBLICA || 'https://dte-api.xplusapp.org';
 const REINTENTOS_WEBHOOK_MS = [0, 10000, 60000];
 
-let transporterCache = null;
+let transporterEnvCache = null;
+// transporters por proveedor SMTP, invalidados cuando cambia updatedAt
+const transportersProvider = new Map(); // providerId -> { version, transporter, from }
 
-function obtenerTransporter() {
-  if (transporterCache !== null) return transporterCache;
+function obtenerTransporterEnv() {
+  if (transporterEnvCache !== null) return transporterEnvCache;
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    transporterCache = false; // marcado como "no configurado"
+    transporterEnvCache = false; // marcado como "no configurado"
     return false;
   }
   const nodemailer = require('nodemailer');
-  transporterCache = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_SEGURO === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-  });
-  return transporterCache;
+  transporterEnvCache = {
+    transporter: nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      secure: process.env.SMTP_SEGURO === 'true',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    }),
+    from: process.env.SMTP_FROM || process.env.SMTP_USER
+  };
+  return transporterEnvCache;
+}
+
+/**
+ * Resuelve el transporter para una empresa: su proveedor SMTP seleccionado
+ * (notificaciones.smtpProviderId) o, si no tiene, las variables de entorno.
+ * Devuelve { transporter, from } o false si no hay SMTP disponible.
+ */
+async function obtenerTransporter(empresa) {
+  const providerId = empresa.notificaciones?.smtpProviderId;
+  if (providerId) {
+    try {
+      const SmtpProvider = require('../models/SmtpProvider');
+      const provider = await SmtpProvider.findById(providerId);
+      if (provider && provider.activo) {
+        const version = provider.updatedAt ? provider.updatedAt.getTime() : 0;
+        const clave = provider._id.toString();
+        const cacheado = transportersProvider.get(clave);
+        if (cacheado && cacheado.version === version) return cacheado;
+
+        const nodemailer = require('nodemailer');
+        const { descifrarContrasena } = require('./certificadoService');
+        const entrada = {
+          version,
+          transporter: nodemailer.createTransport({
+            host: provider.host,
+            port: provider.puerto,
+            secure: provider.seguro,
+            auth: { user: provider.usuario, pass: descifrarContrasena(provider.contrasena) }
+          }),
+          from: provider.remitente || provider.usuario
+        };
+        transportersProvider.set(clave, entrada);
+        return entrada;
+      }
+      console.warn(`⚠️ [EMAIL] Proveedor SMTP ${providerId} inexistente o inactivo, usando SMTP del entorno`);
+    } catch (err) {
+      console.error(`❌ [EMAIL] Error cargando proveedor SMTP ${providerId}: ${String(err.message).slice(0, 120)}`);
+    }
+  }
+  return obtenerTransporterEnv();
 }
 
 /**
@@ -109,9 +156,9 @@ async function enviarWebhook(invoice, empresa) {
 async function enviarKudePorEmail(invoiceId, empresa) {
   if (!empresa.notificaciones?.emailAutomatico) return;
 
-  const transporter = obtenerTransporter();
-  if (!transporter) {
-    console.warn('⚠️ [EMAIL] emailAutomatico activo pero SMTP no configurado (SMTP_HOST/SMTP_USER/SMTP_PASS)');
+  const smtp = await obtenerTransporter(empresa);
+  if (!smtp) {
+    console.warn('⚠️ [EMAIL] emailAutomatico activo pero sin SMTP: la empresa no tiene proveedor asignado y el entorno no define SMTP_HOST/SMTP_USER/SMTP_PASS');
     return;
   }
 
@@ -153,8 +200,8 @@ async function enviarKudePorEmail(invoiceId, empresa) {
   }
 
   try {
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    await smtp.transporter.sendMail({
+      from: smtp.from,
       to: destinatario,
       subject: `Factura electrónica ${invoice.correlativo} - ${empresa.nombreFantasia}`,
       text: `Estimado/a ${invoice.cliente?.nombre || 'cliente'}:\n\n` +

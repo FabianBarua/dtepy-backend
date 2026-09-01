@@ -25,8 +25,23 @@ function normalizarEstablecimientos(establecimientos) {
  * Valida la configuración de notificaciones. Devuelve mensaje de error o
  * null; normaliza el objeto en el lugar (genera webhookSecret si falta).
  */
-function validarNotificaciones(notificaciones) {
+async function validarNotificaciones(notificaciones, usuarioId) {
   if (!notificaciones) return null;
+  if (notificaciones.smtpProviderId !== undefined) {
+    if (!notificaciones.smtpProviderId) {
+      notificaciones.smtpProviderId = null;   // vacío = usar SMTP_* del entorno
+    } else {
+      const mongoose = require('mongoose');
+      if (!mongoose.isValidObjectId(notificaciones.smtpProviderId)) {
+        return 'smtpProviderId inválido';
+      }
+      const SmtpProvider = require('../models/SmtpProvider');
+      const provider = await SmtpProvider.findOne({ _id: notificaciones.smtpProviderId, usuarioId });
+      if (!provider) {
+        return 'smtpProviderId no corresponde a un proveedor SMTP del usuario';
+      }
+    }
+  }
   if (notificaciones.webhookUrl === '' || notificaciones.webhookUrl === null) {
     notificaciones.webhookUrl = undefined;   // vacío = desactivar webhook
   } else if (notificaciones.webhookUrl !== undefined) {
@@ -210,7 +225,7 @@ exports.crear = async (req, res) => {
     if (errorEmisor) {
       return res.status(400).json({ success: false, error: errorEmisor });
     }
-    const errorNotif = validarNotificaciones(notificaciones);
+    const errorNotif = await validarNotificaciones(notificaciones, req.usuario._id);
     if (errorNotif) {
       return res.status(400).json({ success: false, error: errorNotif });
     }
@@ -291,7 +306,7 @@ exports.actualizar = async (req, res) => {
     if (errorEmisor) {
       return res.status(400).json({ success: false, error: errorEmisor });
     }
-    const errorNotif = validarNotificaciones(notificaciones);
+    const errorNotif = await validarNotificaciones(notificaciones, req.usuario._id);
     if (errorNotif) {
       return res.status(400).json({ success: false, error: errorNotif });
     }

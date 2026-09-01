@@ -2383,7 +2383,12 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
               emailAutomatico: {
                 type: 'boolean',
                 default: false,
-                description: 'Al aprobarse la factura, envía automáticamente el KUDE (PDF) + XML al email del cliente (data.cliente.email). Requiere SMTP configurado en el servidor: variables de entorno SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_FROM y SMTP_SEGURO=true si el puerto es 465.'
+                description: 'Al aprobarse la factura, envía automáticamente el KUDE (PDF) + XML al email del cliente (data.cliente.email). Usa el proveedor SMTP seleccionado en smtpProviderId (gestionados desde la UI en /api/smtp-providers); si la empresa no tiene proveedor, cae a las variables de entorno del servidor: SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_FROM y SMTP_SEGURO=true si el puerto es 465.'
+              },
+              smtpProviderId: {
+                type: 'string',
+                nullable: true,
+                description: 'ID del proveedor SMTP (colección gestionada en la UI, endpoints /api/smtp-providers, solo sesión JWT) con el que se envían los emails de esta empresa. null o vacío = usar el SMTP del entorno del servidor.'
               }
             }
           },

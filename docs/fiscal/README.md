@@ -22,7 +22,7 @@ Consecuencia: **los 3 requisitos de plaza se cumplen** (inscripta + Ciudad del E
 ## NO SE PUEDE
 
 1. **Eximir IVA a un extranjero solo por ser extranjero.** Si compra bienes o servicios que se consumen en Paraguay y no es una venta RTC, paga **IVA 10% igual que un paraguayo**. La factura sale B2C nominada con su pasaporte, gravada normal.
-   ⚠️ El checkout hoy hace esto mal: `next-compras-aqui/lib/tax.ts` pone IVA 0 a todo no-PY. **Corregir.**
+   ✓ Resuelto (01/09/2026): el checkout factura según residencia/RTC con el motor fiscal de `next-compras-aqui/lib/fiscal` — ver [05-emision-tienda.md](05-emision-tienda.md).
 2. **"Tax free" (devolución de IVA al turista): no existe en Paraguay.** No hay esquema de devolución en frontera/aeropuerto. Solo existe RTC (exención en origen).
 3. **Usar B2F para venta de bienes a un turista** → SIFEN rechaza (regla 1320: B2F exige país ≠ PRY; venta local exige país = PRY).
 4. **Vender bajo RTC a un residente en Paraguay** → reliquidación del IVA + sanciones DNIT.
@@ -50,3 +50,4 @@ En **todos** los casos B2C/B2B locales el país del receptor en el XML es `PRY` 
 - [02-reglas-receptor-sifen.md](02-reglas-receptor-sifen.md) — todas las reglas del receptor con códigos de rechazo SIFEN.
 - [03-payloads-dte-api.md](03-payloads-dte-api.md) — payloads listos para `POST /api/facturar/crear` por caso.
 - [04-anexo-rtc.md](04-anexo-rtc.md) — qué productos entran y cuáles no, con el CSV de los 485 códigos NCM ([anexo-rtc-ncm.csv](anexo-rtc-ncm.csv)).
+- [05-emision-tienda.md](05-emision-tienda.md) — decisiones de la emisión desde comprasaqui.com: código de cliente, dirección/catalogo geográfico, recargo distribuido, cancelación 48 h, bitácora.

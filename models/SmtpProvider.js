@@ -47,6 +47,12 @@ const smtpProviderSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  // false = aceptar certificados autofirmados/inválidos (rejectUnauthorized
+  // false), necesario para servidores propios como poste.io sin cert firmado.
+  validarCertificado: {
+    type: Boolean,
+    default: true
+  },
   usuarioId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -60,5 +66,18 @@ const smtpProviderSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Configuración de nodemailer para este proveedor. requireTLS en los puertos
+// STARTTLS garantiza que las credenciales nunca viajen en texto plano.
+smtpProviderSchema.methods.opcionesTransporte = function(contrasenaPlana) {
+  return {
+    host: this.host,
+    port: this.puerto,
+    secure: this.seguro,
+    requireTLS: !this.seguro,
+    auth: { user: this.usuario, pass: contrasenaPlana },
+    ...(this.validarCertificado === false ? { tls: { rejectUnauthorized: false } } : {})
+  };
+};
 
 module.exports = mongoose.model('SmtpProvider', smtpProviderSchema);

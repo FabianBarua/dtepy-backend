@@ -68,12 +68,9 @@ async function obtenerTransporter(empresa) {
         const { descifrarContrasena } = require('./certificadoService');
         const entrada = {
           version,
-          transporter: nodemailer.createTransport({
-            host: provider.host,
-            port: provider.puerto,
-            secure: provider.seguro,
-            auth: { user: provider.usuario, pass: descifrarContrasena(provider.contrasena) }
-          }),
+          transporter: nodemailer.createTransport(
+            provider.opcionesTransporte(descifrarContrasena(provider.contrasena))
+          ),
           from: provider.remitente || provider.usuario
         };
         transportersProvider.set(clave, entrada);

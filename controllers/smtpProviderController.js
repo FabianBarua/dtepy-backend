@@ -82,7 +82,7 @@ exports.obtener = async (req, res) => {
  */
 exports.crear = async (req, res) => {
   try {
-    const { nombre, host, puerto, seguro, usuario, contrasena, remitente, activo } = req.body;
+    const { nombre, host, puerto, seguro, usuario, contrasena, remitente, activo, validarCertificado } = req.body;
 
     const error = validarDatos(req.body, true);
     if (error) {
@@ -100,6 +100,7 @@ exports.crear = async (req, res) => {
       usuario,
       contrasena: certificadoService.cifrarContrasena(contrasena),
       remitente,
+      validarCertificado: validarCertificado !== undefined ? Boolean(validarCertificado) : true,
       activo: activo !== undefined ? Boolean(activo) : true,
       usuarioId: req.usuario._id
     });
@@ -133,7 +134,7 @@ exports.crear = async (req, res) => {
  */
 exports.actualizar = async (req, res) => {
   try {
-    const { nombre, host, puerto, seguro, usuario, contrasena, remitente, activo } = req.body;
+    const { nombre, host, puerto, seguro, usuario, contrasena, remitente, activo, validarCertificado } = req.body;
 
     const error = validarDatos(req.body, false);
     if (error) {
@@ -156,6 +157,7 @@ exports.actualizar = async (req, res) => {
     if (usuario) provider.usuario = usuario;
     if (contrasena) provider.contrasena = certificadoService.cifrarContrasena(contrasena);
     if (remitente !== undefined) provider.remitente = remitente || undefined;
+    if (validarCertificado !== undefined) provider.validarCertificado = Boolean(validarCertificado);
     if (activo !== undefined) provider.activo = Boolean(activo);
 
     await provider.save();
@@ -240,13 +242,7 @@ exports.probar = async (req, res) => {
 
     const nodemailer = require('nodemailer');
     const transporter = nodemailer.createTransport({
-      host: provider.host,
-      port: provider.puerto,
-      secure: provider.seguro,
-      auth: {
-        user: provider.usuario,
-        pass: certificadoService.descifrarContrasena(provider.contrasena)
-      },
+      ...provider.opcionesTransporte(certificadoService.descifrarContrasena(provider.contrasena)),
       connectionTimeout: 10000
     });
 

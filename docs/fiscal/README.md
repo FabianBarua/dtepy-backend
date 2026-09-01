@@ -6,11 +6,11 @@ Actualizado: 2026-09-01. Verificado contra Manual Técnico SIFEN v150 + Notas T�
 
 **KINGSTON CENTER S.A. (RUC 80055783-2) ESTÁ INSCRIPTA en el Régimen de Turismo** — verificado en el listado oficial DNIT actualizado al 06/08/2026, fila 257, página 5: "80055783 KINGSTON CENTER SOCIEDAD ANONIMA MEDIANO CIUDAD DEL ESTE".
 Fuente: https://www.dnit.gov.py/web/portal-institucional/contribuyentes-inscriptos-en-el-r%C3%A9gimen-de-turismo (PDF: "Listado Regimen de Turismo para la WEB 06-08-2026").
-Consecuencia: **los 3 requisitos de plaza se cumplen** (inscripta + Ciudad del Este habilitada + rubro informática/electrónica en el anexo) → se puede facturar EXENTO a turistas extranjeros no residentes por bienes del anexo. Recordar: la inscripción vence (vigencia 2 años, RG 26/2025) — **verificar renovación antes del vencimiento** y que la mercadería vendida exenta sea de origen RTC (importada bajo el régimen o comprada a importador RTC — confirmar con el contador).
+Consecuencia: **los 3 requisitos de plaza se cumplen** (inscripta + Ciudad del Este habilitada + rubro informática/electrónica en el anexo) -> se puede facturar EXENTO a turistas extranjeros no residentes por bienes del anexo. Recordar: la inscripción vence (vigencia 2 años, RG 26/2025) — **verificar renovación antes del vencimiento** y que la mercadería vendida exenta sea de origen RTC (importada bajo el régimen o comprada a importador RTC — confirmar con el contador).
 
 ## SE PUEDE (exento de IVA)
 
-1. **RTC — Régimen de Turismo de Compras**: vender bienes del anexo (~485 códigos NCM: electrónica, informática, etc.) a un turista extranjero, **exento de IVA**.
+1. **RTC — Régimen de Turismo de Compras**: vender bienes del anexo (485 códigos NCM: electrónica, informática, etc. — lista completa en [04-anexo-rtc.md](04-anexo-rtc.md) y [anexo-rtc-ncm.csv](anexo-rtc-ncm.csv)) a un turista extranjero, **exento de IVA**.
    Necesario: empresa **inscripta en el Registro RTC** de la DNIT (RG 26/2025, vigencia 2 años) + local en ciudad habilitada (Asunción, CDE, Encarnación, PJC, Pilar, Salto del Guairá) + comprador **persona física extranjera sin nacionalidad paraguaya, sin domicilio ni residencia en PY** + factura **siempre nominada** con pasaporte o cédula extranjera y país de residencia.
    → Detalle: [01-exento-iva-extranjeros.md](01-exento-iva-extranjeros.md)
 
@@ -49,3 +49,4 @@ En **todos** los casos B2C/B2B locales el país del receptor en el XML es `PRY` 
 - [01-exento-iva-extranjeros.md](01-exento-iva-extranjeros.md) — RTC y B2F al detalle, con fuentes.
 - [02-reglas-receptor-sifen.md](02-reglas-receptor-sifen.md) — todas las reglas del receptor con códigos de rechazo SIFEN.
 - [03-payloads-dte-api.md](03-payloads-dte-api.md) — payloads listos para `POST /api/facturar/crear` por caso.
+- [04-anexo-rtc.md](04-anexo-rtc.md) — qué productos entran y cuáles no, con el CSV de los 485 códigos NCM ([anexo-rtc-ncm.csv](anexo-rtc-ncm.csv)).

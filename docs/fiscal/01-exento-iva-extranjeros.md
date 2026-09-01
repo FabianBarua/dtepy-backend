@@ -13,7 +13,7 @@
 **Requisitos para que UNA venta califique (todos a la vez)**:
 1. Vendedor **inscripto en el Registro RTC** (vigencia 2 años, renovable a pedido).
 2. Local en ciudad habilitada: **Asunción, Ciudad del Este, Encarnación, Pedro Juan Caballero, Pilar, Salto del Guairá**.
-3. Bien incluido en el **anexo del decreto** (~485 códigos NCM tras el Decreto 3237/25).
+3. Bien incluido en el **anexo del Decreto 2063/2024** (485 códigos NCM — el Decreto 3237/2025 NO modificó la lista, solo los requisitos del importador). Lista completa y exclusiones: [04-anexo-rtc.md](04-anexo-rtc.md) + [anexo-rtc-ncm.csv](anexo-rtc-ncm.csv).
 4. Comprador **turista**: persona física + extranjera (sin nacionalidad paraguaya) + **sin domicilio ni residencia en Paraguay**. Se acredita con pasaporte o documento de identidad de su país.
 
 **Cómo se factura (en SIFEN no hay campo "RTC")**:

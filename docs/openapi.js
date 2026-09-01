@@ -1401,7 +1401,7 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
                           declaradaPor: {
                             type: 'object',
                             properties: {
-                              tipo: { type: 'string', enum: ['usuario', 'api_key'] },
+                              tipo: { type: 'string', enum: ['usuario', 'api_key', 'automatica'], description: '`automatica` = la declaró el sincronizador desde el proveedor configurado' },
                               nombre: { type: 'string' },
                               email: { type: 'string' }
                             }
@@ -1471,6 +1471,130 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
           401: { description: 'Token faltante o inválido' },
           403: { description: 'API Key sin permiso cotizaciones:editar' },
           404: { description: 'EMPRESA_FUERA_DE_ALCANCE' }
+        }
+      }
+    },
+
+    '/api/cotizaciones/proveedores': {
+      get: {
+        tags: ['Cotizaciones'],
+        summary: 'Catálogo de proveedores de cotización automática',
+        description: 'Lista HARDCODEADA de fuentes disponibles. La empresa solo puede elegir un `id` de esta lista: no se acepta una URL arbitraria (sería un SSRF y una vía para inyectar cotizaciones falsas en documentos fiscales). JWT o API Key con `facturas:leer`.',
+        responses: {
+          200: okJson('Proveedores disponibles', envuelto({
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', example: 'sistemaaguila' },
+                nombre: { type: 'string', example: 'Sistema Águila (cotizaciones SET)' },
+                descripcion: { type: 'string' },
+                monedas: { type: 'array', items: { type: 'string' }, example: ['USD', 'BRL', 'ARS', 'JPY', 'EUR', 'GBP'] },
+                fuente: { type: 'string', format: 'uri' }
+              }
+            }
+          })),
+          401: NO_AUTORIZADO
+        }
+      }
+    },
+
+    '/api/cotizaciones/automatica': {
+      get: {
+        tags: ['Cotizaciones'],
+        summary: 'Configuración de la actualización automática',
+        description: 'Devuelve la configuración de la empresa y el resultado del último intento de sincronización. `fechaObjetivo` es la fecha de la cotización que rige hoy (la publicada ayer). Con una sola empresa en el alcance, `empresaId`/`ruc` es opcional.',
+        parameters: [
+          { name: 'empresaId', in: 'query', schema: { type: 'string' }, description: 'ID de la empresa' },
+          { name: 'ruc', in: 'query', schema: { type: 'string' }, description: 'RUC de la empresa (alternativa a empresaId)' }
+        ],
+        responses: {
+          200: okJson('Configuración vigente', envuelto(ref('CotizacionAutomatica'))),
+          401: NO_AUTORIZADO,
+          404: respuestaError('La empresa no existe o no pertenece al alcance')
+        }
+      },
+      put: {
+        tags: ['Cotizaciones'],
+        summary: 'Configurar la actualización automática',
+        description: `
+Activa o ajusta la actualización automática. **Solo sesión JWT**: define de dónde
+salen valores que terminan en documentos fiscales firmados, así que una API Key
+filtrada no puede cambiar la fuente.
+
+**Cómo funciona el ciclo.** En Paraguay la cotización que rige para facturar el día D
+es la que la SET/DNIT publicó el día D-1 (la fuente la publica esa misma tarde,
+~17:00 PY). Al cambiar el día en hora de Asunción, la empresa queda "sin la
+cotización de hoy" y el worker la busca; si la fuente todavía no publicó, reintenta
+cada 5 minutos entre las 00:00 y las 06:00, y cada hora el resto del día. Cuando ya
+está al día no se hace ninguna petición. Sábados, domingos y feriados la fuente no
+publica y sigue vigente la última cotización, que es lo que corresponde.
+
+**Cuándo se aplica.** La fuente publica la cotización del día D la tarde del
+propio día D, pero ese valor recién rige el día D+1: si ya publicó la de hoy,
+**no se aplica hasta la medianoche**. Y una cotización declarada a mano hoy no
+la pisa el sincronizador hasta el día siguiente — una decisión humana sobre el
+día en curso manda.
+
+**Guardas** (esto es dinero en documentos firmados):
+- Solo fuentes del catálogo, por https, con lista blanca de hosts revalidada tras redirecciones.
+- Se rechaza una fecha futura o más vieja que 5 días.
+- \`variacionMaximaPct\`: si el valor nuevo se aparta de la cotización vigente más que
+  ese porcentaje, **no se aplica** y queda marcado para revisión manual.
+- Una sola cotización por empresa+moneda+fecha de la fuente (índice único): reintentar
+  no duplica nada.
+`.trim(),
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  activo: { type: 'boolean', description: 'Requiere al menos una moneda configurada' },
+                  proveedor: { type: 'string', example: 'sistemaaguila', description: 'id del catálogo (GET /api/cotizaciones/proveedores)' },
+                  monedas: { type: 'array', items: { type: 'string' }, example: ['USD'], description: 'Deben estar entre las que publica el proveedor' },
+                  tipoValor: { type: 'string', enum: ['compra', 'venta', 'promedio'], default: 'venta' },
+                  variacionMaximaPct: { type: 'number', default: 10, minimum: 0.1, maximum: 100 },
+                  empresaId: { type: 'string' },
+                  ruc: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: okJson('Configuración guardada', envuelto(ref('CotizacionAutomatica'))),
+          400: respuestaError('Proveedor, moneda, tipoValor o variación inválidos, o activar sin monedas'),
+          401: NO_AUTORIZADO,
+          403: respuestaError('Requiere sesión de usuario (no API Key)')
+        }
+      }
+    },
+
+    '/api/cotizaciones/sincronizar': {
+      post: {
+        tags: ['Cotizaciones'],
+        summary: 'Forzar una sincronización ahora',
+        description: 'Consulta la fuente en el momento, salteando el atajo de "ya está al día" y la caché. Las validaciones y la guarda de variación siguen aplicando. Sesión JWT o API Key con `cotizaciones:editar`.\n\nEstados posibles: `ok` (se aplicó), `sin_cambios` (ya estaba), `pendiente_fuente` (la fuente todavía no publicó la del día), `bloqueada` (variación excesiva, requiere revisión) y `error`.',
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  empresaId: { type: 'string' },
+                  ruc: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: okJson('Resultado de la sincronización', envuelto(ref('ResumenSincronizacion'))),
+          401: NO_AUTORIZADO,
+          502: respuestaError('No se pudo consultar la fuente')
         }
       }
     },
@@ -2505,6 +2629,58 @@ El resultado de SET viene en \`data\`: \`estadoEvento: registrado\` con
       },
 
       // ------------------------------ solicitud de factura ------------------------------
+      CotizacionAutomatica: {
+        type: 'object',
+        description: 'Configuración de actualización automática de cotizaciones de una empresa.',
+        properties: {
+          empresaId: { type: 'string' },
+          ruc: { type: 'string' },
+          activo: { type: 'boolean', default: false },
+          proveedor: { type: 'string', example: 'sistemaaguila' },
+          monedas: { type: 'array', items: { type: 'string' }, example: ['USD'] },
+          tipoValor: { type: 'string', enum: ['compra', 'venta', 'promedio'], example: 'venta' },
+          variacionMaximaPct: { type: 'number', example: 10, description: 'Un salto mayor a este % sobre la vigente no se aplica solo' },
+          fechaObjetivo: { type: 'string', format: 'date', example: '2026-08-31', description: 'Fecha de la cotización que rige hoy (la publicada ayer)' },
+          ultimaSincronizacion: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              en: { type: 'string', format: 'date-time' },
+              estado: { type: 'string', enum: ['ok', 'sin_cambios', 'pendiente_fuente', 'bloqueada', 'error'] },
+              fechaCotizacion: { type: 'string', format: 'date', nullable: true },
+              mensaje: { type: 'string' }
+            }
+          }
+        }
+      },
+
+      ResumenSincronizacion: {
+        type: 'object',
+        description: 'Qué hizo (o por qué no hizo nada) una sincronización.',
+        properties: {
+          empresaId: { type: 'string' },
+          ruc: { type: 'string' },
+          estado: { type: 'string', enum: ['ok', 'sin_cambios', 'pendiente_fuente', 'bloqueada', 'error'] },
+          mensaje: { type: 'string' },
+          fechaCotizacion: { type: 'string', format: 'date', description: 'Fecha publicada por la fuente' },
+          monedas: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                moneda: { type: 'string', example: 'USD' },
+                estado: { type: 'string', enum: ['aplicada', 'sin_cambios', 'pendiente_fuente', 'bloqueada', 'no_publicada', 'error'] },
+                valor: { type: 'number', example: 5912.9 },
+                valorAnterior: { type: 'number', nullable: true },
+                variacionPct: { type: 'number', description: 'Solo cuando quedó bloqueada' },
+                fechaCotizacion: { type: 'string', format: 'date' },
+                mensaje: { type: 'string' }
+              }
+            }
+          }
+        }
+      },
+
       SolicitudFactura: {
         type: 'object',
         required: ['param', 'data'],

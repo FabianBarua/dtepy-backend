@@ -156,6 +156,48 @@ const empresaSchema = new mongoose.Schema({
     }
   },
 
+  // Actualización automática de las cotizaciones de moneda extranjera desde
+  // un proveedor del catálogo (services/cotizacionProveedores.js). Apagada por
+  // defecto: mientras esté apagada, la cotización la sigue declarando el usuario.
+  cotizacionesAutomaticas: {
+    activo: {
+      type: Boolean,
+      default: false
+    },
+    // id del catálogo hardcodeado; NUNCA una URL
+    proveedor: {
+      type: String,
+      default: 'sistemaaguila'
+    },
+    // monedas a sincronizar (ISO 4217). Vacío = ninguna.
+    monedas: {
+      type: [String],
+      default: ['USD']
+    },
+    // qué valor del par se declara como cotización
+    tipoValor: {
+      type: String,
+      enum: ['compra', 'venta', 'promedio'],
+      default: 'venta'
+    },
+    // Guarda de seguridad: si el valor nuevo se aparta de la cotización vigente
+    // más que este porcentaje, NO se aplica solo y queda para revisión manual.
+    // Evita que un error de la fuente se cuele en documentos fiscales firmados.
+    variacionMaximaPct: {
+      type: Number,
+      default: 10,
+      min: 0.1,
+      max: 100
+    },
+    // Resultado del último intento (para mostrar en la UI y diagnosticar)
+    ultimaSincronizacion: {
+      en: Date,
+      estado: { type: String, enum: ['ok', 'sin_cambios', 'pendiente_fuente', 'bloqueada', 'error'] },
+      fechaCotizacion: String,
+      mensaje: String
+    }
+  },
+
   // Certificado digital (solo metadatos, archivo en filesystem)
   certificado: {
     nombreArchivo: String,

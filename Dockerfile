@@ -53,7 +53,9 @@ ENV NODE_ENV=production
 ENV PORT=8081
 EXPOSE 8081
 
-# API + los dos workers en un solo contenedor.
-# Para escalarlos por separado, usar `npm start`, `npm run worker` y
-# `npm run worker:lote` en servicios distintos.
+# API + los tres workers en un solo contenedor.
+# Para escalarlos por separado, usar `npm start`, `npm run worker`,
+# `npm run worker:lote` y `npm run worker:cotizacion` en servicios distintos.
+# OJO con worker:cotizacion: una sola instancia alcanza (y el índice único de
+# Cotizacion evita duplicados si igual corrieran dos).
 CMD ["npm", "run", "start:all"]

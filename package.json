@@ -9,12 +9,13 @@
     "worker": "node workers/facturaWorker.js",
     "worker:dev": "nodemon workers/facturaWorker.js",
     "worker:lote": "node workers/consultaResultadoLoteWorker.js",
-    "start:all": "concurrently \"npm start\" \"npm run worker\" \"npm run worker:lote\"",
+    "start:all": "concurrently \"npm start\" \"npm run worker\" \"npm run worker:lote\" \"npm run worker:cotizacion\"",
     "dev:all": "concurrently \"npm run dev\" \"npm run worker:dev\"",
     "crear-admin": "node crear-admin.js",
     "kude:prepare": "node scripts/kude-prepare.js",
     "kude:doctor": "node scripts/kude-doctor.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "worker:cotizacion": "node workers/cotizacionWorker.js"
   },
   "keywords": [
     "sifen",

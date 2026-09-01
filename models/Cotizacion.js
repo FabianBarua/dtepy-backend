@@ -28,11 +28,20 @@ const cotizacionSchema = new mongoose.Schema({
     required: true,
     min: [0.000001, 'La cotización debe ser mayor a 0']
   },
-  // Quién la declaró (sesión de usuario o API Key)
+  // Quién la declaró (sesión de usuario, API Key o el sincronizador automático)
   declaradaPor: {
-    tipo: { type: String, enum: ['usuario', 'api_key'], required: true },
+    tipo: { type: String, enum: ['usuario', 'api_key', 'automatica'], required: true },
     nombre: { type: String, default: '' },
     email: { type: String, default: '' }
+  },
+  // Solo en las automáticas: de dónde salió el valor. `fechaCotizacion` es la
+  // fecha que publicó la fuente (en Paraguay rige al día siguiente), y es la
+  // que hace idempotente la sincronización.
+  fuente: {
+    proveedor: { type: String },
+    fechaCotizacion: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
+    tipoValor: { type: String, enum: ['compra', 'venta', 'promedio'] },
+    url: { type: String }
   }
 }, {
   timestamps: true
@@ -40,5 +49,16 @@ const cotizacionSchema = new mongoose.Schema({
 
 // La vigente se busca por empresa+moneda ordenando por fecha de creación
 cotizacionSchema.index({ empresaId: 1, moneda: 1, createdAt: -1 });
+
+// Una sola cotización automática por empresa+moneda+fecha de la fuente: si dos
+// ticks del worker corren a la vez, el segundo choca contra el índice en vez de
+// duplicar la declaración. Las manuales no tienen `fuente` y quedan afuera.
+cotizacionSchema.index(
+  { empresaId: 1, moneda: 1, 'fuente.fechaCotizacion': 1 },
+  {
+    unique: true,
+    partialFilterExpression: { 'fuente.fechaCotizacion': { $type: 'string' } }
+  }
+);
 
 module.exports = mongoose.model('Cotizacion', cotizacionSchema);

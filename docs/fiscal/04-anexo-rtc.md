@@ -4,7 +4,7 @@ Fuente primaria: **Anexo del Decreto 2063/2024** (texto oficial DNIT, 485 códig
 
 ## Regla de oro
 
-La elegibilidad es **por código NCM de 10 dígitos, no por nombre de producto**. Antes de marcar `rtc_eligible` en el catálogo, confirmar la partida arancelaria del ítem con el despacho de importación (ahí figura el NCM exacto). Un producto que no está en el anexo **se vende igual a extranjeros, pero con IVA 10%** (B2C común). B2F no tiene nada que ver con esto: es solo exportación de servicios.
+La elegibilidad es **por código NCM de 10 dígitos, no por nombre de producto**. En el catálogo `rtc_eligible` arranca en **true** (decisión de negocio: el catálogo es esencialmente electrónica del anexo) — lo que hay que hacer es **apagar el switch "Turismo (RTC)" en las excepciones** (aires 8415, scooters eléctricos 8711, heladeras, drones, ropa/calzado revendidos…), desde la ficha del producto o con la edición masiva del dashboard. Ante la duda, confirmar la partida arancelaria con el despacho de importación (ahí figura el NCM exacto). Un producto que no está en el anexo **se vende igual a extranjeros, pero con IVA 10%** (B2C común). B2F no tiene nada que ver con esto: es solo exportación de servicios.
 
 ## Qué SÍ entra (lo relevante para Kingston)
 

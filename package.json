@@ -14,7 +14,7 @@
     "crear-admin": "node crear-admin.js",
     "kude:prepare": "node scripts/kude-prepare.js",
     "kude:doctor": "node scripts/kude-doctor.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/**/*.test.js",
     "worker:cotizacion": "node workers/cotizacionWorker.js"
   },
   "keywords": [
@@ -38,7 +38,7 @@
     "facturacionelectronicapy-kude": "^1.0.18",
     "facturacionelectronicapy-qrgen": "^1.0.9",
     "facturacionelectronicapy-setapi": "^1.0.34",
-    "facturacionelectronicapy-xmlgen": "^1.0.280",
+    "facturacionelectronicapy-xmlgen": "1.0.283",
     "facturacionelectronicapy-xmlsign": "^1.0.28",
     "helmet": "^8.3.0",
     "ioredis": "^5.9.3",

@@ -1,9 +1,11 @@
 const crypto = require('crypto');
 const Invoice = require('../models/Invoice');
+const OperationLog = require('../models/OperationLog');
 const SecuenciaFactura = require('../models/SecuenciaFactura');
 const { facturaQueue, kudeQueue } = require('../queues/facturaQueue');
 const { normalizarFechasEnObjeto } = require('../utils/fechaUtils');
 const { buscarEmpresaPorRUC, validarEmpresaActiva, validarCertificadoValido } = require('./empresaService');
+const { validarReceptor } = require('./receptorValidator');
 
 const tiposDocumentoMap = {
   1: 'Factura electrónica',
@@ -114,6 +116,30 @@ async function encolarKUDE(facturaId, xmlPath, cdc, correlativo, fechaCreacion, 
   }, { priority: 1 });
 }
 
+/**
+ * Bitácora de la validación del receptor: qué se validó, con qué resultado y
+ * en qué modo, ligado a la factura. Es la evidencia que se muestra si la DNIT
+ * pregunta por qué un DTE salió con esos datos. Nunca bloquea la emisión.
+ */
+async function registrarValidacionReceptor(invoiceId, validacionReceptor) {
+  if (!validacionReceptor) return;
+  const { errores, advertencias, modo } = validacionReceptor;
+  if (errores.length === 0 && advertencias.length === 0) return;
+  try {
+    await OperationLog.create({
+      invoiceId,
+      tipoOperacion: 'validacion_receptor',
+      descripcion: errores.length > 0
+        ? `Receptor con ${errores.length} error(es) SIFEN y ${advertencias.length} advertencia(s) [modo ${modo}]`
+        : `Receptor normalizado con ${advertencias.length} advertencia(s) [modo ${modo}]`,
+      detalle: { errores, advertencias, modo },
+      estado: errores.length > 0 ? 'warning' : 'success'
+    });
+  } catch (logErr) {
+    console.error('No se pudo registrar validacion_receptor:', logErr.message);
+  }
+}
+
 async function crearFactura(datosFactura) {
   const data = datosFactura.data || datosFactura;
 
@@ -141,6 +167,45 @@ async function crearFactura(datosFactura) {
       new Error(`Moneda ${monedaOperacion} no permitida por la política de la empresa. Monedas habilitadas: ${monedasPermitidas.join(', ')} (configurable en la empresa: configuracionSifen.monedasPermitidas)`),
       { statusCode: 400, errorCode: 'MONEDA_NO_PERMITIDA' }
     );
+  }
+
+  // ── Validación del receptor (pre-SIFEN) ──────────────────────────
+  // Replica las reglas del receptor del MT v150 + NT vigentes ANTES de firmar
+  // (docs/fiscal/02-reglas-receptor-sifen.md). Modos por empresa
+  // (configuracionSifen.validacionReceptor):
+  //   'estricto'    → los errores rechazan la emisión con 400 RECEPTOR_INVALIDO
+  //   'advertencia' → (default) normaliza + registra, sin rechazar: permite
+  //                   desplegar sin romper integraciones y ver qué corregir
+  //   'off'         → escape hatch, sin validación
+  // En ambos modos activos el cliente queda NORMALIZADO (DV recalculado,
+  // documento limpio, país por defecto, campos prohibidos removidos): el bug
+  // del `"undefined"` firmado muere acá.
+  const modoValidacionReceptor = empresa.configuracionSifen?.validacionReceptor || 'advertencia';
+  let validacionReceptor = null;
+  if (modoValidacionReceptor !== 'off') {
+    const resultado = validarReceptor(data);
+    validacionReceptor = {
+      modo: modoValidacionReceptor,
+      errores: resultado.errores,
+      advertencias: resultado.advertencias,
+      fecha: new Date()
+    };
+    if (resultado.errores.length > 0 && modoValidacionReceptor === 'estricto') {
+      throw Object.assign(
+        new Error(`Receptor inválido: ${resultado.errores.map(e => e.mensaje).join(' | ')}`),
+        {
+          statusCode: 400,
+          errorCode: 'RECEPTOR_INVALIDO',
+          detalles: { errores: resultado.errores, advertencias: resultado.advertencias }
+        }
+      );
+    }
+    if (resultado.cliente) {
+      data.cliente = resultado.cliente;
+    }
+    if (resultado.errores.length > 0) {
+      console.warn(`⚠️ Receptor con ${resultado.errores.length} error(es) SIFEN (modo advertencia): ${resultado.errores.map(e => e.codigo).join(', ')}`);
+    }
   }
 
   // Establecimiento y punto de expedición: si el payload no los trae, se usan
@@ -234,6 +299,8 @@ async function crearFactura(datosFactura) {
 
     await facturaExistente.save();
 
+    await registrarValidacionReceptor(facturaExistente._id, validacionReceptor);
+
     const job = await encolarFactura(facturaExistente._id, datosFactura, empresa._id);
 
     return {
@@ -254,15 +321,24 @@ async function crearFactura(datosFactura) {
     rucEmpresa: empresa.ruc,
     correlativo,
     cliente: {
+      // `ruc` conserva el fallback histórico porque la búsqueda del listado
+      // (routes/invoices.js) filtra por este campo; los campos siguientes son
+      // el snapshot fiel para auditoría.
       ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
       nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
       razonSocial: cliente.razonSocial,
       nombreFantasia: cliente.nombreFantasia,
+      contribuyente: cliente.contribuyente,
+      tipoOperacion: cliente.tipoOperacion,
+      pais: cliente.pais,
+      tipoContribuyente: cliente.tipoContribuyente,
       direccion: cliente.direccion,
       telefono: cliente.telefono,
       email: cliente.email,
       documentoTipo: cliente.documentoTipo,
-      documentoNumero: cliente.documentoNumero
+      documentoNumero: cliente.documentoNumero,
+      // Resultado de la validación pre-SIFEN al momento de emitir (auditoría).
+      validacionReceptor
     },
     total: totalFactura,
     fechaCreacion: new Date(),
@@ -275,6 +351,8 @@ async function crearFactura(datosFactura) {
   });
 
   await invoice.save();
+
+  await registrarValidacionReceptor(invoice._id, validacionReceptor);
 
   const job = await encolarFactura(invoice._id, datosFactura, empresa._id);
 

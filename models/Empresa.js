@@ -121,6 +121,15 @@ const empresaSchema = new mongoose.Schema({
       enum: ['normal', 'lotes'],
       default: 'normal'
     },
+    // Validación del receptor pre-SIFEN (services/receptorValidator.js):
+    //   'estricto'    → errores rechazan la emisión con 400 RECEPTOR_INVALIDO
+    //   'advertencia' → normaliza + registra en OperationLog sin rechazar
+    //   'off'         → sin validación (escape hatch)
+    validacionReceptor: {
+      type: String,
+      enum: ['estricto', 'advertencia', 'off'],
+      default: 'advertencia'
+    },
     // Monedas en las que la empresa acepta emitir (política contable).
     // SIFEN admite cualquier ISO 4217, pero la contabilidad define cuáles
     // usa: una emisión en otra moneda se rechaza con MONEDA_NO_PERMITIDA.

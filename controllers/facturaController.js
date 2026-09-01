@@ -107,3 +107,29 @@ exports.obtenerEmpresa = async (req, res) => {
     res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: 'Error al obtener empresa' });
   }
 };
+
+/**
+ * POST /api/facturar/validar — dry-run del receptor.
+ *
+ * Corre exactamente la misma validación/normalización que /crear aplica antes
+ * de emitir, sin crear nada. El integrador (el checkout del e-commerce) lo usa
+ * para saber ANTES de cobrar si el cliente está completo para facturar, y qué
+ * corregir si no ("invoice readiness").
+ */
+exports.validar = async (req, res) => {
+  try {
+    const { validarReceptor } = require('../services/receptorValidator');
+    const data = req.body?.data || req.body || {};
+    const resultado = validarReceptor(data);
+    res.json({
+      success: true,
+      valido: resultado.errores.length === 0,
+      errores: resultado.errores,
+      advertencias: resultado.advertencias,
+      clienteNormalizado: resultado.cliente
+    });
+  } catch (error) {
+    console.error('Error en /facturar/validar:', error);
+    res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: 'Error al validar el receptor' });
+  }
+};

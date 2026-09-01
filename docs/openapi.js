@@ -480,10 +480,15 @@ el total en guaraníes (dTotalGs) lo calcula el sistema.
 **IVA por item** (\`items[].ivaTipo\`): 1 = gravado (con \`ivaBase\` % gravado y
 \`iva\` 10/5), 2 = exonerado y 3 = exento (ambos con \`ivaBase: 0, iva: 0\`),
 4 = gravado parcial (\`ivaBase\` = % gravado). **Régimen de Turismo (RTC,
-Dto. 2063/2024)**: venta a turista no residente exenta de IVA — item con
-\`ivaTipo: 3\`, cliente con pasaporte (\`documentoTipo: 2\`), \`tipoOperacion: 4\`
-(B2F) y país de residencia extranjero, y \`param.tipoRegimen: 1\`. Requiere
-estar inscripto en el registro RTC de la DNIT.
+Dto. 2063/2024)**: venta local de bienes del anexo a turista extranjero no
+residente, exenta de IVA — items con \`ivaTipo: 3\`, cliente **B2C**
+(\`tipoOperacion: 2\`) con pasaporte (\`documentoTipo: 2\`) o cédula extranjera
+(\`3\`), \`pais: "PRY"\` (regla SIFEN 1320: en operaciones que no son B2F el
+país del receptor es siempre PRY; el país de residencia real se consigna en
+\`data.observacion\`), y empresa con \`tipoRegimen: 1\`. Requiere estar
+inscripto en el registro RTC de la DNIT. **B2F (\`tipoOperacion: 4\`) es solo
+para exportación de servicios** — ahí sí va el país real y la dirección del
+exterior (obligatoria).
 
 ---
 
@@ -522,6 +527,41 @@ estar inscripto en el registro RTC de la DNIT.
           401: NO_AUTORIZADO,
           403: respuestaError('El RUC emisor no pertenece al alcance del token (EMPRESA_FUERA_DE_ALCANCE)'),
           404: respuestaError('No existe una empresa con ese RUC')
+        }
+      }
+    },
+
+    '/api/facturar/validar': {
+      post: {
+        tags: ['Facturación'],
+        summary: 'Validar el receptor sin emitir (dry-run)',
+        description: 'Corre exactamente la misma validación y normalización del receptor que `/api/facturar/crear` aplica antes de firmar (reglas del receptor de SIFEN MT v150 + NT vigentes: 1300/1304/1305/1309-1314/1318/1320/1321/1330/1333, formato de pasaporte, DV módulo 11, tope de innominado de 7.000.000 Gs del Decreto 872/2023), sin crear nada. Pensado para que la integración calcule el "invoice readiness" del cliente ANTES de cobrar una orden y sepa exactamente qué corregir. Devuelve además `clienteNormalizado` (documento limpio, DV recalculado, país por defecto, campos prohibidos removidos), que es lo que se firmaría. JWT o API Key con `facturas:leer`.',
+        requestBody: {
+          content: {
+            'application/json': { schema: ref('SolicitudFactura') }
+          }
+        },
+        responses: {
+          200: okJson('Resultado de la validación', {
+            type: 'object',
+            properties: {
+              valido: { type: 'boolean' },
+              errores: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    codigo: { type: 'string', example: 'RECEPTOR_PAIS_INVALIDO' },
+                    regla: { type: 'string', nullable: true, example: '1320', description: 'Código de validación SIFEN que rechazaría el documento' },
+                    mensaje: { type: 'string' }
+                  }
+                }
+              },
+              advertencias: { type: 'array', items: { type: 'string' } },
+              clienteNormalizado: { type: 'object', nullable: true }
+            }
+          }),
+          401: NO_AUTORIZADO
         }
       }
     },
@@ -2465,6 +2505,12 @@ día en curso manda.
                 default: 'normal',
                 description: '`normal` envía cada documento por separado; `lotes` los agrupa'
               },
+              validacionReceptor: {
+                type: 'string',
+                enum: ['estricto', 'advertencia', 'off'],
+                default: 'advertencia',
+                description: 'Validación del receptor pre-SIFEN en /api/facturar/crear. `estricto`: los errores rechazan con 400 RECEPTOR_INVALIDO (con los códigos SIFEN que habrían rechazado el DTE). `advertencia` (default): normaliza el cliente (DV recalculado, documento limpio, país por defecto) y registra el resultado en la bitácora (validacion_receptor) sin rechazar. `off`: sin validación.'
+              },
               timbradoFecha: {
                 type: 'string',
                 pattern: '^\\d{4}-\\d{2}-\\d{2}$',
@@ -2746,6 +2792,10 @@ día en curso manda.
               condicionTipoCambio: { type: 'integer', description: '1 = cotización global de la operación (con data.cambio), 2 = cotización por item (cambio en cada item)' },
               cambio: { type: 'number', example: 7300, description: 'Guaraníes por unidad de la moneda (obligatorio si moneda != PYG y condicionTipoCambio = 1)' },
               descuentoGlobal: { type: 'number' },
+              observacion: {
+                type: 'string',
+                description: 'Información de interés del emisor (dInfoEmi): aparece en el KUDE. Usarla para la leyenda del Régimen de Turismo ("Régimen de Turismo de Compras - Decreto N° 2063/2024") y el país de residencia real del cliente extranjero (el campo cliente.pais es PRY en toda operación que no sea B2F, regla 1320).'
+              },
               cliente: {
                 type: 'object',
                 properties: {
@@ -2753,7 +2803,7 @@ día en curso manda.
                   ruc: { type: 'string' },
                   razonSocial: { type: 'string' },
                   nombreFantasia: { type: 'string' },
-                  tipoOperacion: { type: 'integer', description: '1 = B2B, 2 = B2C, 3 = B2G, 4 = B2F (consumidor final extranjero, p.ej. turista RTC)' },
+                  tipoOperacion: { type: 'integer', description: '1 = B2B, 2 = B2C, 3 = B2G, 4 = B2F (SOLO exportación de servicios al exterior; un turista que compra bienes es B2C con pasaporte/cédula extranjera y pais PRY — regla SIFEN 1320)' },
                   direccion: { type: 'string' },
                   numeroCasa: { type: 'string' },
                   departamento: { type: 'integer' },
@@ -2761,8 +2811,9 @@ día en curso manda.
                   ciudad: { type: 'integer' },
                   pais: { type: 'string', example: 'PRY' },
                   tipoContribuyente: { type: 'integer' },
-                  documentoTipo: { type: 'integer', description: '1 = cédula paraguaya, 2 = pasaporte, 3 = cédula extranjera, 4 = carnet de residencia, 9 = otro' },
-                  documentoNumero: { type: 'string' },
+                  documentoTipo: { type: 'integer', description: 'Obligatorio si contribuyente=false: 1 = cédula paraguaya, 2 = pasaporte, 3 = cédula extranjera, 4 = carnet de residencia, 5 = innominado (solo B2C y total < 7.000.000 Gs — Decreto 872/2023), 6 = tarjeta diplomática, 9 = otro (exige documentoTipoDescripcion). No informar si contribuyente=true.' },
+                  documentoNumero: { type: 'string', description: 'Sin puntos, barras ni espacios (se normaliza). Pasaporte: A-Z0-9, 5 a 15. Innominado: "0".' },
+                  documentoTipoDescripcion: { type: 'string', description: 'Obligatorio con documentoTipo 9 (ej: "CNPJ", "Tax ID")' },
                   telefono: { type: 'string' },
                   celular: { type: 'string' },
                   email: { type: 'string', format: 'email' }

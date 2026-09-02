@@ -6,7 +6,7 @@ const { facturaQueue, kudeQueue } = require('../queues/facturaQueue');
 const { normalizarFechasEnObjeto } = require('../utils/fechaUtils');
 const { buscarEmpresaPorRUC, validarEmpresaActiva, validarCertificadoValido } = require('./empresaService');
 const { validarReceptor } = require('./receptorValidator');
-const { evaluarPlazoTransmision } = require('../utils/plazosSifen');
+const { evaluarPlazoEmision } = require('../utils/plazosSifen');
 
 const tiposDocumentoMap = {
   1: 'Factura electrónica',
@@ -297,20 +297,24 @@ async function crearFactura(datosFactura) {
   if (!data.punto) data.punto = empresa.configuracionSifen?.puntoExpedicion || '001';
   validarPuntoHabilitado(empresa, data);
 
-  // Ventana de transmisión de SET: emitir con fecha retroactiva es válido, pero
-  // el documento tiene que entrar dentro de las 72 h siguientes a su dFeEmiDE.
-  // Cortar acá evita quemar un correlativo en un rechazo cantado.
-  const plazoEnvio = evaluarPlazoTransmision(data.fecha);
-  if (!plazoEnvio.dentro) {
+  // Rango de dFeEmiDE que acepta SET: hasta 720 h atrás (1150) y 120 h adelante
+  // (1151). Emitir retroactivo es válido —una NC de tres días atrás entra de
+  // sobra—; lo que se corta acá es la fecha fuera de rango, para no quemar un
+  // correlativo en un rechazo cantado.
+  const plazoEmision = evaluarPlazoEmision(data.fecha);
+  if (!plazoEmision.dentro) {
+    const desfase = Math.abs(plazoEmision.horasDesfase).toFixed(1);
+    const sentido = plazoEmision.motivo === 'retroactiva' ? 'anterior' : 'posterior';
     throw Object.assign(
-      new Error(`La fecha de emisión ${data.fecha} tiene ${plazoEnvio.horasTranscurridas.toFixed(1)} h de antigüedad y SET solo recibe documentos hasta ${plazoEnvio.horasLimite} h después de la emisión. Emití con una fecha dentro de la ventana.`),
+      new Error(`La fecha de emisión ${data.fecha} es ${desfase} h ${sentido} a la transmisión y SET acepta como máximo ${plazoEmision.horasLimite} h en ese sentido.`),
       {
         statusCode: 400,
-        errorCode: 'FUERA_DE_PLAZO_TRANSMISION',
+        errorCode: 'FECHA_EMISION_FUERA_DE_RANGO',
         detalles: {
           fechaEmision: data.fecha,
-          horasTranscurridas: Number(plazoEnvio.horasTranscurridas.toFixed(2)),
-          horasLimite: plazoEnvio.horasLimite
+          motivo: plazoEmision.motivo,
+          horasDesfase: Number(plazoEmision.horasDesfase.toFixed(2)),
+          horasLimite: plazoEmision.horasLimite
         }
       }
     );

@@ -14,12 +14,19 @@ const HORAS_CANCELACION_FACTURA = 48;
 const HORAS_CANCELACION_OTROS = 168;
 
 /**
- * Ventana de transmisión: SET recibe un DTE hasta 72 horas después de la fecha
- * y hora de emisión declarada (dFeEmiDE). Pasado ese plazo el documento se
- * rechaza del lado de SET, así que emitir retroactivo funciona —incluso con
- * fecha de tres días atrás— siempre que el envío entre dentro de esa ventana.
+ * Rango válido de la fecha de emisión (dFeEmiDE) respecto de la transmisión,
+ * según el Manual Técnico v150:
+ *
+ *  - 1150: hasta 720 horas (30 días) ANTERIOR a la transmisión.
+ *  - 1151: hasta 120 horas (5 días) POSTERIOR.
+ *
+ * Ojo con la regla de las 72 h, que es otra cosa: cuenta desde dFecFirma (la
+ * firma) hasta la transmisión, y pasarse no rechaza el documento —lo aprueba
+ * con la observación de extemporáneo (1005)—. Este backend firma y envía en
+ * menos de un minuto, así que nunca aplica.
  */
-const HORAS_TRANSMISION = 72;
+const HORAS_EMISION_RETROACTIVA = 720;
+const HORAS_EMISION_ADELANTADA = 120;
 
 /**
  * Horas de plazo según la descripción del tipo de documento.
@@ -56,33 +63,39 @@ function evaluarPlazoCancelacion(fechaAprobacion, descripcionTipoDE, ahora = Dat
 }
 
 /**
- * Evalúa si un DTE con fecha de emisión retroactiva todavía entra en la
- * ventana de transmisión de SET.
+ * Evalúa si la fecha de emisión declarada entra en el rango que acepta SET.
  *
- * Una fecha ilegible se deja pasar (decide SET); una fecha futura da
- * horasTranscurridas negativas y por lo tanto entra en plazo (el adelanto de
- * fecha lo controla SET con su propia validación).
+ * Una fecha ilegible se deja pasar: decide SET, que es la autoridad.
  *
  * @param {Date|string} fechaEmision  dFeEmiDE declarado en el documento
  * @param {number} [ahora]            timestamp actual (inyectable en tests)
- * @returns {{ dentro: boolean, horasLimite: number, horasTranscurridas: number }}
+ * @returns {{ dentro: boolean, motivo: string|null, horasLimite: number, horasDesfase: number }}
+ *          `horasDesfase` es positivo hacia atrás y negativo hacia adelante.
  */
-function evaluarPlazoTransmision(fechaEmision, ahora = Date.now()) {
+function evaluarPlazoEmision(fechaEmision, ahora = Date.now()) {
   const emitida = fechaEmision == null ? NaN : new Date(fechaEmision).getTime();
 
   if (!Number.isFinite(emitida)) {
-    return { dentro: true, horasLimite: HORAS_TRANSMISION, horasTranscurridas: 0 };
+    return { dentro: true, motivo: null, horasLimite: HORAS_EMISION_RETROACTIVA, horasDesfase: 0 };
   }
 
-  const horasTranscurridas = (ahora - emitida) / 3600000;
-  return { dentro: horasTranscurridas <= HORAS_TRANSMISION, horasLimite: HORAS_TRANSMISION, horasTranscurridas };
+  const horasDesfase = (ahora - emitida) / 3600000;
+
+  if (horasDesfase > HORAS_EMISION_RETROACTIVA) {
+    return { dentro: false, motivo: 'retroactiva', horasLimite: HORAS_EMISION_RETROACTIVA, horasDesfase };
+  }
+  if (-horasDesfase > HORAS_EMISION_ADELANTADA) {
+    return { dentro: false, motivo: 'adelantada', horasLimite: HORAS_EMISION_ADELANTADA, horasDesfase };
+  }
+  return { dentro: true, motivo: null, horasLimite: HORAS_EMISION_RETROACTIVA, horasDesfase };
 }
 
 module.exports = {
   HORAS_CANCELACION_FACTURA,
   HORAS_CANCELACION_OTROS,
-  HORAS_TRANSMISION,
+  HORAS_EMISION_RETROACTIVA,
+  HORAS_EMISION_ADELANTADA,
   horasLimiteCancelacion,
   evaluarPlazoCancelacion,
-  evaluarPlazoTransmision
+  evaluarPlazoEmision
 };

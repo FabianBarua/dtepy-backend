@@ -176,6 +176,11 @@ facturaQueue.process('generar-factura', async (job) => {
     // Canal sync (normal): el estado final se conoce acá mismo. Webhook +
     // email del KUDE, fire-and-forget. (En el canal de lotes lo dispara
     // envioLoteService cuando SET resuelve el lote.)
+    if (['rechazado', 'error'].includes(resultado.estado)) {
+      const { liberarNumeroRechazado } = require('../services/numeracionService');
+      await liberarNumeroRechazado(facturaId);
+    }
+
     if (['aceptado', 'observado', 'rechazado', 'error'].includes(resultado.estado)) {
       const { notificarFacturaFinal } = require('../services/notificacionService');
       notificarFacturaFinal(facturaId);

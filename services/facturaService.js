@@ -7,6 +7,7 @@ const { normalizarFechasEnObjeto } = require('../utils/fechaUtils');
 const { buscarEmpresaPorRUC, validarEmpresaActiva, validarCertificadoValido } = require('./empresaService');
 const { validarReceptor } = require('./receptorValidator');
 const { evaluarPlazoEmision } = require('../utils/plazosSifen');
+const { ESTADOS_NUNCA_EN_SET } = require('./numeracionService');
 
 const tiposDocumentoMap = {
   1: 'Factura electrónica',
@@ -158,7 +159,14 @@ async function asignarNumeroCorrelativo(empresa, datosFactura) {
 
     const numero = String(secuencia.ultimoNumero).padStart(7, '0');
     const correlativo = `${clave.establecimiento}-${clave.punto}-${numero}`;
-    const ocupado = await Invoice.exists({ empresaId: empresa._id, correlativo, de: deDescripcion });
+    // Un documento rechazado o con error no existe en SET: su número está
+    // libre y el registro se reutiliza más abajo por hash.
+    const ocupado = await Invoice.exists({
+      empresaId: empresa._id,
+      correlativo,
+      de: deDescripcion,
+      estadoSifen: { $nin: ESTADOS_NUNCA_EN_SET }
+    });
     if (!ocupado) return numero;
   }
 

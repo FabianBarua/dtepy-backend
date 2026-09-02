@@ -240,7 +240,13 @@ async function consultarResultadoLote(loteId) {
         estadoVisual: estadoVisual,
         mensajeRetorno: msgRes,
         codigoRetorno: codRes
-      }).then(() => {
+      }).then(async () => {
+        // Rechazo: el documento no existe en SET, así que su número vuelve al
+        // contador en vez de quedar como hueco a inutilizar.
+        if (estadoIndividual === 'rechazado') {
+          const { liberarNumeroRechazado } = require('./numeracionService');
+          await liberarNumeroRechazado(facturaIdNotificar);
+        }
         // estado final alcanzado: webhook + email del KUDE (fire-and-forget)
         const { notificarFacturaFinal } = require('./notificacionService');
         notificarFacturaFinal(facturaIdNotificar);
@@ -258,7 +264,7 @@ async function consultarResultadoLote(loteId) {
     };
 
     await lote.save();
-    return { lote, completado: todosResueltos, mensaje: `Procesadas ${resultadosMatch.length} facturas` };
+    return { lote, completado: todosResueltos, mensaje: `Procesadas ${bloques.length} facturas` };
   }
 
   return { lote, completado: false, codigoLote: codigo, mensaje: mensajeLote || `Código: ${codigo}` };

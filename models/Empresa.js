@@ -92,6 +92,14 @@ const empresaSchema = new mongoose.Schema({
       default: '001',
       maxlength: 3
     },
+    // Puntos de expedición ADICIONALES habilitados para esta empresa. El
+    // payload solo puede pedir el punto por defecto o uno de esta lista: así
+    // una integración no emite por error en un rango que pertenece a otro
+    // sistema de la misma empresa.
+    puntosExpedicion: [{
+      type: String,
+      maxlength: 3
+    }],
     // CSC - Código Secreto del Contribuyente (proporcionado por SET)
     idCSC: {
       type: String,

@@ -14,7 +14,7 @@
     "crear-admin": "node crear-admin.js",
     "kude:prepare": "node scripts/kude-prepare.js",
     "kude:doctor": "node scripts/kude-doctor.js",
-    "test": "node --test tests/**/*.test.js",
+    "test": "node --test \"tests/**/*.test.js\"",
     "worker:cotizacion": "node workers/cotizacionWorker.js"
   },
   "keywords": [

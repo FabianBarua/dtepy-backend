@@ -6,6 +6,7 @@ const { facturaQueue, kudeQueue } = require('../queues/facturaQueue');
 const { normalizarFechasEnObjeto } = require('../utils/fechaUtils');
 const { buscarEmpresaPorRUC, validarEmpresaActiva, validarCertificadoValido } = require('./empresaService');
 const { validarReceptor } = require('./receptorValidator');
+const { evaluarPlazoTransmision } = require('../utils/plazosSifen');
 
 const tiposDocumentoMap = {
   1: 'Factura electrónica',
@@ -18,20 +19,101 @@ const tiposDocumentoMap = {
   8: 'Comprobante de retención electrónico'
 };
 
-function generarFacturaHash(datosFactura) {
-  const ruc = datosFactura.param?.ruc;
-  const csa = datosFactura.data?.codigoSeguridadAleatorio;
-  const numero = datosFactura.data?.numero;
-  const cadena = `${ruc}|${csa}|${numero}`;
-  return crypto.createHash('sha256').update(cadena).digest('hex');
-}
-
 function construirCorrelativo(datosFactura) {
   const data = datosFactura.data || datosFactura;
   const establecimiento = String(data.establecimiento || '001').padStart(3, '0');
   const punto = String(data.punto || '001').padStart(3, '0');
   const numero = String(data.numero || '0000001').padStart(7, '0');
   return `${establecimiento}-${punto}-${numero}`;
+}
+
+/**
+ * Identidad fiscal del documento: emisor + tipo de DE + timbrado + correlativo
+ * (establecimiento-punto-número). Es lo que hace único a un documento ante SET.
+ *
+ * Antes se hasheaba `ruc|codigoSeguridadAleatorio|numero`: el CSA recién se
+ * genera en el worker, así que acá llegaba `undefined`, y dos documentos
+ * distintos con el mismo número (la FE 001-002-0000001 y la NC 001-001-0000001)
+ * daban el mismo hash. El segundo entraba por la rama de "reintento" y PISABA
+ * el registro del primero (visto en producción el 2026-09-02).
+ */
+function generarFacturaHash(datosFactura, empresa) {
+  const data = datosFactura.data || datosFactura;
+  const ruc = datosFactura.param?.ruc || empresa?.ruc || datosFactura.ruc;
+  const tipoDocumento = Number(data.tipoDocumento || datosFactura.tipoDocumento || 1);
+  const timbrado = String(datosFactura.param?.timbradoNumero || data.timbrado || empresa?.configuracionSifen?.timbrado || '');
+  const cadena = `${ruc}|${tipoDocumento}|${timbrado}|${construirCorrelativo(datosFactura)}`;
+  return crypto.createHash('sha256').update(cadena).digest('hex');
+}
+
+// Estados en los que el documento EXISTE (o existió) en SET: nunca se reutiliza
+// el registro ni el número. 'cancelado' incluido: una FE cancelada sigue siendo
+// un documento emitido; lo que corresponde es emitir con otro número.
+const ESTADOS_FINALES_EN_SET = ['aceptado', 'observado', 'cancelado'];
+
+function snapshotCliente(cliente, validacionReceptor) {
+  return {
+    // `ruc` conserva el fallback histórico porque la búsqueda del listado
+    // (routes/invoices.js) filtra por este campo; los campos siguientes son
+    // el snapshot fiel para auditoría.
+    ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
+    nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
+    razonSocial: cliente.razonSocial,
+    nombreFantasia: cliente.nombreFantasia,
+    contribuyente: cliente.contribuyente,
+    tipoOperacion: cliente.tipoOperacion,
+    pais: cliente.pais,
+    tipoContribuyente: cliente.tipoContribuyente,
+    direccion: cliente.direccion,
+    telefono: cliente.telefono,
+    email: cliente.email,
+    documentoTipo: cliente.documentoTipo,
+    documentoNumero: cliente.documentoNumero,
+    // Resultado de la validación pre-SIFEN al momento de emitir (auditoría).
+    validacionReceptor
+  };
+}
+
+/**
+ * El establecimiento y el punto de expedición tienen que ser de los que la
+ * empresa tiene registrados: cada rango de numeración pertenece a un emisor
+ * concreto y meterse en uno ajeno (por ejemplo el 001-001 que usa otro sistema
+ * de la misma empresa) genera documentos con numeración pisada ante SET.
+ *
+ * El default de la empresa siempre pasa. Para habilitar puntos adicionales se
+ * cargan en configuracionSifen.puntosExpedicion.
+ */
+function validarPuntoHabilitado(empresa, data) {
+  const config = empresa.configuracionSifen || {};
+  const establecimiento = String(data.establecimiento).padStart(3, '0');
+  const punto = String(data.punto).padStart(3, '0');
+
+  const establecimientosOk = new Set(
+    [config.establecimiento, ...(empresa.establecimientos || []).map(e => e.codigo)]
+      .filter(Boolean)
+      .map(codigo => String(codigo).padStart(3, '0'))
+  );
+  if (establecimientosOk.size > 0 && !establecimientosOk.has(establecimiento)) {
+    throw Object.assign(
+      new Error(`Establecimiento ${establecimiento} no registrado para ${empresa.ruc}. Habilitados: ${[...establecimientosOk].join(', ')}`),
+      { statusCode: 400, errorCode: 'ESTABLECIMIENTO_NO_HABILITADO', detalles: { establecimiento, habilitados: [...establecimientosOk] } }
+    );
+  }
+
+  const puntosOk = new Set(
+    [config.puntoExpedicion, ...(config.puntosExpedicion || [])]
+      .filter(Boolean)
+      .map(codigo => String(codigo).padStart(3, '0'))
+  );
+  if (puntosOk.size > 0 && !puntosOk.has(punto)) {
+    throw Object.assign(
+      new Error(`Punto de expedición ${punto} no habilitado para ${empresa.ruc}. Habilitados: ${[...puntosOk].join(', ')} (se configuran en configuracionSifen.puntoExpedicion / puntosExpedicion)`),
+      { statusCode: 400, errorCode: 'PUNTO_NO_HABILITADO', detalles: { punto, habilitados: [...puntosOk] } }
+    );
+  }
+
+  data.establecimiento = establecimiento;
+  data.punto = punto;
 }
 
 /**
@@ -213,6 +295,26 @@ async function crearFactura(datosFactura) {
   // numeración (la secuencia es por establecimiento+punto).
   if (!data.establecimiento) data.establecimiento = empresa.configuracionSifen?.establecimiento || '001';
   if (!data.punto) data.punto = empresa.configuracionSifen?.puntoExpedicion || '001';
+  validarPuntoHabilitado(empresa, data);
+
+  // Ventana de transmisión de SET: emitir con fecha retroactiva es válido, pero
+  // el documento tiene que entrar dentro de las 72 h siguientes a su dFeEmiDE.
+  // Cortar acá evita quemar un correlativo en un rechazo cantado.
+  const plazoEnvio = evaluarPlazoTransmision(data.fecha);
+  if (!plazoEnvio.dentro) {
+    throw Object.assign(
+      new Error(`La fecha de emisión ${data.fecha} tiene ${plazoEnvio.horasTranscurridas.toFixed(1)} h de antigüedad y SET solo recibe documentos hasta ${plazoEnvio.horasLimite} h después de la emisión. Emití con una fecha dentro de la ventana.`),
+      {
+        statusCode: 400,
+        errorCode: 'FUERA_DE_PLAZO_TRANSMISION',
+        detalles: {
+          fechaEmision: data.fecha,
+          horasTranscurridas: Number(plazoEnvio.horasTranscurridas.toFixed(2)),
+          horasLimite: plazoEnvio.horasLimite
+        }
+      }
+    );
+  }
 
   // Numeración: si la integración no manda data.numero, el sistema asigna el
   // siguiente correlativo. Debe ocurrir ANTES de construir hash/correlativo
@@ -226,17 +328,41 @@ async function crearFactura(datosFactura) {
 
   const correlativo = construirCorrelativo(datosFactura);
   const totalFactura = calcularTotal(datosFactura);
-  const facturaHash = generarFacturaHash(datosFactura);
+  const facturaHash = generarFacturaHash(datosFactura, empresa);
   const tipoDocumentoCodigo = data.tipoDocumento || datosFactura.tipoDocumento;
   const deDescripcion = tiposDocumentoMap[tipoDocumentoCodigo] || 'Factura electrónica';
   const tipoEmisionVal = data.tipoEmision || datosFactura.tipoEmision || 1;
   const cliente = data.cliente || datosFactura.cliente || {};
 
-  const facturaExistente = await Invoice.findOne({ facturaHash });
+  // Mismo documento (emisor + tipo + timbrado + correlativo) ya registrado:
+  // por hash (registros nuevos) o por correlativo + tipo (registros anteriores
+  // al cambio de fórmula del hash). Un documento que existe en SET nunca se
+  // reutiliza: solo se reintenta uno que falló antes de llegar a SET.
+  let facturaExistente = await Invoice.findOne({ facturaHash });
+  if (!facturaExistente) {
+    facturaExistente = await Invoice.findOne({
+      empresaId: empresa._id,
+      correlativo,
+      de: deDescripcion,
+      estadoSifen: { $in: ESTADOS_FINALES_EN_SET }
+    });
+  }
 
   if (facturaExistente) {
-    const estadosFinalesAprobados = ['aceptado', 'observado'];
-    const estaAprobada = estadosFinalesAprobados.includes(facturaExistente.estadoSifen) && facturaExistente.cdc;
+    const estaAprobada = ESTADOS_FINALES_EN_SET.includes(facturaExistente.estadoSifen) && facturaExistente.cdc;
+
+    if (facturaExistente.estadoSifen === 'cancelado' && facturaExistente.cdc) {
+      throw Object.assign(new Error(`El documento ${correlativo} (${deDescripcion}) ya fue emitido y cancelado en SET (CDC ${facturaExistente.cdc}). Emití con otro número.`), {
+        statusCode: 409, errorCode: 'FACTURA_YA_CANCELADA',
+        detalles: {
+          facturaId: facturaExistente._id,
+          fechaCreacion: facturaExistente.fechaCreacion,
+          correlativo: facturaExistente.correlativo,
+          estadoSifen: facturaExistente.estadoSifen,
+          cdc: facturaExistente.cdc
+        }
+      });
+    }
 
     if (estaAprobada && facturaExistente.proceso === 'No completado') {
       facturaExistente.proceso = null;
@@ -278,8 +404,17 @@ async function crearFactura(datosFactura) {
       });
     }
 
+    // Reintento de un documento que nunca llegó a SET (error, rechazado, en
+    // cola): se reutiliza el registro con los datos NUEVOS, incluido el
+    // snapshot del cliente y el total (antes quedaban los del intento previo).
+    const estadoAnteriorReintento = facturaExistente.estadoSifen;
+    const mensajeAnteriorReintento = facturaExistente.mensajeRetorno;
+
     facturaExistente.datosFactura = datosFactura;
     facturaExistente.correlativo = correlativo;  // el reintento puede cambiar est/punto
+    facturaExistente.facturaHash = facturaHash;
+    facturaExistente.cliente = snapshotCliente(cliente, validacionReceptor);
+    facturaExistente.total = totalFactura;
     facturaExistente.estadoSifen = 'encolado';
     facturaExistente.proceso = null;
     facturaExistente.fechaCreacion = new Date();
@@ -294,8 +429,8 @@ async function crearFactura(datosFactura) {
     facturaExistente.fechaProceso = null;
     facturaExistente.respuestaSifen = {};
 
-    const estadoAnterior = facturaExistente.estadoSifen;
-    const mensajeAnterior = facturaExistente.mensajeRetorno;
+    const estadoAnterior = estadoAnteriorReintento;
+    const mensajeAnterior = mensajeAnteriorReintento;
 
     await facturaExistente.save();
 
@@ -320,26 +455,7 @@ async function crearFactura(datosFactura) {
     empresaId: empresa._id,
     rucEmpresa: empresa.ruc,
     correlativo,
-    cliente: {
-      // `ruc` conserva el fallback histórico porque la búsqueda del listado
-      // (routes/invoices.js) filtra por este campo; los campos siguientes son
-      // el snapshot fiel para auditoría.
-      ruc: cliente.ruc || cliente.documentoNumero || 'N/A',
-      nombre: cliente.razonSocial || cliente.nombreFantasia || cliente.nombre || 'N/A',
-      razonSocial: cliente.razonSocial,
-      nombreFantasia: cliente.nombreFantasia,
-      contribuyente: cliente.contribuyente,
-      tipoOperacion: cliente.tipoOperacion,
-      pais: cliente.pais,
-      tipoContribuyente: cliente.tipoContribuyente,
-      direccion: cliente.direccion,
-      telefono: cliente.telefono,
-      email: cliente.email,
-      documentoTipo: cliente.documentoTipo,
-      documentoNumero: cliente.documentoNumero,
-      // Resultado de la validación pre-SIFEN al momento de emitir (auditoría).
-      validacionReceptor
-    },
+    cliente: snapshotCliente(cliente, validacionReceptor),
     total: totalFactura,
     fechaCreacion: new Date(),
     estadoSifen: 'encolado',
@@ -367,4 +483,4 @@ async function crearFactura(datosFactura) {
   };
 }
 
-module.exports = { crearFactura, tiposDocumentoMap };
+module.exports = { crearFactura, tiposDocumentoMap, generarFacturaHash, construirCorrelativo, validarPuntoHabilitado };

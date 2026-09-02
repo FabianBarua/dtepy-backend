@@ -39,7 +39,21 @@ distrito y departamento a partir de la ciudad — solo se manda `ciudad`.
 inequívoca, la factura sale **sin dirección** (fiscalmente válida igual) y la
 bitácora `payload-built` registra `direccion.enviada: false` con el motivo.
 Una dirección ausente es cosmética; una ciudad equivocada es un dato falso
-ante SIFEN.
+ante SIFEN. El **departamento es restricción dura**: ningún fallback puede
+devolver una ciudad de otro departamento.
+
+**Cobertura verificada (01/09/2026)**: las **180 ciudades reales** del API
+AEX corridas contra el resolver → **176 resueltas (97,8 %), 0 errores de
+departamento**. Las 4 sin match (Nueva Fortuna, Santa Rosa del Mbutuy,
+Edelira 28, San Rafael del Paraná) no existen en el catálogo SIFEN
+(verificado una a una): esas facturas salen sin dirección. El resolver
+maneja typos de ambos lados ("Itagua"→ITAUGUA, "ARGTIGAS" del catálogo),
+grafía guaraní QU↔K ("Itakyry"→ITAQUYRY), iniciales del catálogo
+("Higinio Morinigo"→GRAL. H. MORINIGO), sufijos AEX ("San Ignacio
+Misiones", "Bella Vista Norte"), cabeceras de distrito ("San José de los
+Arroyos"→SAN JOSE (MUNICIPIO)) y 4 aliases curados (Santaní→SAN
+ESTANISLAO, Nueva Londres→HUGO STROESSNER, Gral. Resquín→ISIDORO RESQUIN,
+Tomás Romero Pereira→MARIA AUXILIADORA).
 
 **Mantenimiento**: si este backend actualiza `facturacionelectronicapy-xmlgen`,
 regenerar el catálogo de la tienda:

@@ -130,6 +130,10 @@ router.put('/automatica', requerirSesionUsuario, async (req, res) => {
     const empresa = await resolverEmpresa(req, req.body?.empresaId || req.body?.ruc);
     const guardado = empresa.cotizacionesAutomaticas;
     const config = guardado?.toObject ? guardado.toObject() : { ...(guardado || {}) };
+    // El lock lo maneja el sincronizador; guardar la configuración no lo hereda
+    // (si no, un guardado podía revivir un lock ya liberado y dejar el botón
+    // "Sincronizar ahora" contestando "hay una sincronización en curso").
+    delete config.sincronizandoDesde;
 
     if (proveedor !== undefined) {
       const encontrado = cotizacionProveedores.obtener(proveedor);
@@ -203,7 +207,8 @@ router.put('/automatica', requerirSesionUsuario, async (req, res) => {
     res.json({
       success: true,
       message: config.activo
-        ? `Actualización automática activada (${config.monedas.join(', ')}, valor de ${config.tipoValor})`
+        ? `Actualización automática activada (${config.monedas.join(', ')}, valor de ${config.tipoValor}). ` +
+          'La próxima sincronización recalcula con la última cotización publicada.'
         : 'Actualización automática desactivada',
       data: empresa.cotizacionesAutomaticas
     });

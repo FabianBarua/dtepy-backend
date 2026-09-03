@@ -50,15 +50,13 @@ const cotizacionSchema = new mongoose.Schema({
 // La vigente se busca por empresa+moneda ordenando por fecha de creación
 cotizacionSchema.index({ empresaId: 1, moneda: 1, createdAt: -1 });
 
-// Una sola cotización automática por empresa+moneda+fecha de la fuente: si dos
-// ticks del worker corren a la vez, el segundo choca contra el índice en vez de
-// duplicar la declaración. Las manuales no tienen `fuente` y quedan afuera.
-cotizacionSchema.index(
-  { empresaId: 1, moneda: 1, 'fuente.fechaCotizacion': 1 },
-  {
-    unique: true,
-    partialFilterExpression: { 'fuente.fechaCotizacion': { $type: 'string' } }
-  }
-);
+// Acá había un índice ÚNICO por empresa+moneda+fecha de la fuente. Servía para
+// que dos ticks simultáneos no duplicaran la declaración, pero también impedía
+// volver a declarar la misma fecha con otras reglas: cambiar "venta" por
+// "compra" chocaba contra el índice y la sincronización no aplicaba nada.
+// Una redeclaración es una declaración nueva y tiene que quedar en el historial
+// con su propio valor, quién y cuándo. La exclusión entre corridas ahora la da
+// el lock por empresa de cotizacionSyncService (`sincronizandoDesde`).
+// El índice viejo se elimina con migrations/003-cotizaciones-sin-indice-unico.js.
 
 module.exports = mongoose.model('Cotizacion', cotizacionSchema);

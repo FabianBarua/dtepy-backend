@@ -206,6 +206,10 @@ const empresaSchema = new mongoose.Schema({
       min: 0.1,
       max: 100
     },
+    // Lock de exclusión entre corridas (worker vs. "Sincronizar ahora"): lo
+    // toma quien va a salir a la fuente y lo suelta al terminar. Vencido (60 s)
+    // se puede volver a tomar, así un proceso caído no bloquea para siempre.
+    sincronizandoDesde: Date,
     // Resultado del último intento (para mostrar en la UI y diagnosticar)
     ultimaSincronizacion: {
       en: Date,

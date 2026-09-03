@@ -69,7 +69,8 @@ async function vigentes(empresaIds) {
         cotizacionId: { $first: '$_id' },
         valor: { $first: '$valor' },
         declaradaPor: { $first: '$declaradaPor' },
-        declaradaEn: { $first: '$createdAt' }
+        declaradaEn: { $first: '$createdAt' },
+        fuente: { $first: '$fuente' }
       }
     },
     {
@@ -80,7 +81,8 @@ async function vigentes(empresaIds) {
         cotizacionId: 1,
         valor: 1,
         declaradaPor: 1,
-        declaradaEn: 1
+        declaradaEn: 1,
+        fuente: 1
       }
     },
     { $sort: { moneda: 1 } }

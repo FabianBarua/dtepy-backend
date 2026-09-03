@@ -12,6 +12,13 @@
  * los datos, así que un reinicio, un corte de red o un despliegue en el medio
  * no saltean la actualización: al volver, sigue faltando y se reintenta.
  *
+ * El estado incluye CON QUÉ REGLAS quedó declarada cada moneda (fecha de la
+ * fuente + tipo de valor). Mirando solo la fecha, cambiar "venta" por "compra"
+ * no hacía nada hasta que la fuente publicara un día nuevo: la moneda ya
+ * figuraba al día y hasta "Sincronizar ahora" contestaba sin cambios. Ahora un
+ * cambio de reglas deja la moneda pendiente y se vuelve a declarar con la
+ * última cotización publicada.
+ *
  * Sábados, domingos y feriados la fuente no publica: sigue vigente la última
  * cotización, que es exactamente lo que corresponde.
  */
@@ -25,6 +32,11 @@ const TZ = 'America/Asuncion';
 // Antigüedad máxima aceptable de la fecha publicada por la fuente. Cubre un
 // fin de semana largo; más viejo que esto es una fuente abandonada y no se usa.
 const ANTIGUEDAD_MAXIMA_DIAS = 5;
+
+// Una sola corrida por empresa a la vez: dos ticks simultáneos (el worker y el
+// botón "Sincronizar ahora", o dos pestañas) declararían la misma cotización
+// dos veces. El TTL es la red de seguridad si un proceso muere en el medio.
+const LOCK_TTL_MS = 60000;
 
 // Caché en memoria de la descarga: en un mismo tick, todas las empresas que
 // usan el mismo proveedor comparten una sola petición HTTP.
@@ -79,6 +91,11 @@ function esDeHoy(fecha) {
   return new Date(fecha).toLocaleDateString('en-CA', { timeZone: TZ }) === hoyAsuncion();
 }
 
+/** Las declaradas por una persona (UI o API) no tienen `fuente.fechaCotizacion`. */
+function esManual(cotizacion) {
+  return Boolean(cotizacion) && !cotizacion.fuente?.fechaCotizacion;
+}
+
 function normalizarMonedas(monedas) {
   return (monedas || []).map((m) => String(m).toUpperCase().trim()).filter(Boolean);
 }
@@ -90,22 +107,71 @@ function valorSegunTipo(par, tipoValor) {
 }
 
 /**
- * ¿La empresa ya tiene la cotización de la fecha objetivo en todas sus monedas?
- * Si sí, no se toca la red: el caso normal del día es cero peticiones.
+ * ¿La cotización que ya tenemos resuelve la de `fecha` CON ESTAS REGLAS?
+ *
+ * Se mira la fecha de la fuente Y el tipo de valor. Con la fecha sola, cambiar
+ * "venta" por "compra" quedaba esperando a que la fuente publicara un día
+ * nuevo. Una declaración manual (sin `fuente`) nunca resuelve nada acá: de esa
+ * se ocupa la guarda de "declarada a mano hoy".
  */
-async function estaAlDia(empresa, monedas) {
+function yaResuelta(cotizacion, fecha, tipoValor) {
+  const fechaNuestra = cotizacion?.fuente?.fechaCotizacion;
+  return Boolean(fechaNuestra) && fechaNuestra >= fecha && cotizacion.fuente.tipoValor === tipoValor;
+}
+
+/**
+ * ¿La empresa ya tiene la cotización de la fecha objetivo, con el tipo de valor
+ * configurado, en todas sus monedas? Si sí, no se toca la red: el caso normal
+ * del día es cero peticiones.
+ */
+async function estaAlDia(empresa, monedas, tipoValor) {
   const objetivo = fechaObjetivo();
-  const lista = monedas || normalizarMonedas(empresa.cotizacionesAutomaticas?.monedas);
+  const config = empresa.cotizacionesAutomaticas || {};
+  const tipo = tipoValor || config.tipoValor || 'venta';
+  const lista = monedas || normalizarMonedas(config.monedas);
   for (const moneda of lista) {
     const ultima = await vigenteDe(empresa._id, moneda);
-    const fecha = ultima?.fuente?.fechaCotizacion;
-    if (fecha && fecha >= objetivo) continue;
-    // Una cotización declarada a mano HOY es una decisión humana sobre el día
-    // en curso: cuenta como al día para no salir a pisarla.
-    if (esDeHoy(ultima?.createdAt)) continue;
+    if (yaResuelta(ultima, objetivo, tipo)) continue;
+    // Una cotización declarada A MANO hoy es una decisión humana sobre el día
+    // en curso: cuenta como al día para no salir a pisarla. Solo las manuales:
+    // una automática declarada hoy con una fecha vieja (la fuente todavía no
+    // publicó la de ayer) tiene que seguir reintentando el resto del día.
+    if (esManual(ultima) && esDeHoy(ultima.createdAt)) continue;
     return false;
   }
   return true;
+}
+
+/**
+ * Toma el lock de sincronización de la empresa. Devuelve false si otra corrida
+ * lo tiene tomado y todavía no venció.
+ */
+async function tomarLock(empresaId) {
+  const ahora = new Date();
+  const vencido = new Date(ahora.getTime() - LOCK_TTL_MS);
+  const resultado = await Empresa.updateOne(
+    {
+      _id: empresaId,
+      $or: [
+        { 'cotizacionesAutomaticas.sincronizandoDesde': null },
+        { 'cotizacionesAutomaticas.sincronizandoDesde': { $lte: vencido } }
+      ]
+    },
+    { $set: { 'cotizacionesAutomaticas.sincronizandoDesde': ahora } }
+  );
+  return resultado.modifiedCount === 1;
+}
+
+async function soltarLock(empresaId) {
+  try {
+    await Empresa.updateOne(
+      { _id: empresaId },
+      { $unset: { 'cotizacionesAutomaticas.sincronizandoDesde': '' } }
+    );
+  } catch (err) {
+    // El TTL lo libera igual; no vale la pena romper la corrida por esto.
+    console.error('❌ [COTIZACIONES] No se pudo liberar el lock de sincronización:', err.message);
+  }
 }
 
 /**
@@ -141,11 +207,39 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
     return resumen;
   }
 
-  if (!forzado && (await estaAlDia(empresa, monedas))) {
+  const tipoValor = config.tipoValor || 'venta';
+
+  if (!forzado && (await estaAlDia(empresa, monedas, tipoValor))) {
     resumen.estado = 'sin_cambios';
-    resumen.mensaje = 'Ya está la cotización vigente del día';
+    resumen.mensaje = `Ya está la cotización vigente del día (valor de ${tipoValor})`;
     return resumen;
   }
+
+  // De acá en adelante se sale a la red y se declaran cotizaciones: una sola
+  // corrida por empresa a la vez.
+  if (!(await tomarLock(empresa._id))) {
+    resumen.estado = 'sin_cambios';
+    resumen.mensaje = 'Ya hay una sincronización en curso para esta empresa; probá de nuevo en unos segundos';
+    return resumen;
+  }
+
+  try {
+    return await aplicarDesdeFuente(empresa, resumen, {
+      proveedor,
+      monedas,
+      tipoValor,
+      variacionMaxima: Number(config.variacionMaximaPct ?? 10),
+      forzado,
+      maxEdadCacheMs
+    });
+  } finally {
+    await soltarLock(empresa._id);
+  }
+}
+
+/** Descarga, valida la fecha publicada y declara lo que corresponda. */
+async function aplicarDesdeFuente(empresa, resumen, opciones) {
+  const { proveedor, monedas, tipoValor, variacionMaxima, forzado, maxEdadCacheMs } = opciones;
 
   // --- descarga ---
   let datos;
@@ -190,9 +284,9 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
 
   // --- aplicación por moneda ---
   let aplicadas = 0;
+  let redeclaradas = 0;
   let bloqueadas = 0;
-  const tipoValor = config.tipoValor || 'venta';
-  const variacionMaxima = Number(config.variacionMaximaPct ?? 10);
+  let manualesDeHoy = 0;
 
   for (const moneda of monedas) {
     const par = datos.valores[moneda];
@@ -213,7 +307,8 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
     // Si hoy alguien la declaró a mano, esa corrección manda por el resto del
     // día: el robot no deshace una decisión humana. Mañana vuelve a tomar el
     // control con la cotización nueva.
-    if (!fechaNuestra && esDeHoy(ultima?.createdAt)) {
+    if (esManual(ultima) && esDeHoy(ultima.createdAt)) {
+      manualesDeHoy++;
       resumen.monedas.push({
         moneda,
         estado: 'sin_cambios',
@@ -223,16 +318,24 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
       continue;
     }
 
-    // Ya tenemos exactamente esta fecha: nada que hacer (idempotente)
-    if (fechaNuestra && fechaNuestra >= datos.fecha) {
+    // Ya la tenemos con esta fecha (o una más nueva) Y con el mismo tipo de
+    // valor: nada que hacer (idempotente). Si el admin cambió el tipo de valor,
+    // esto no frena: la moneda se vuelve a declarar más abajo con la última
+    // cotización publicada, sin esperar a que la fuente publique otro día.
+    if (yaResuelta(ultima, datos.fecha, tipoValor)) {
       resumen.monedas.push({
         moneda,
         estado: fechaNuestra >= objetivo ? 'sin_cambios' : 'pendiente_fuente',
         valor: ultima.valor,
-        fechaCotizacion: fechaNuestra
+        fechaCotizacion: fechaNuestra,
+        tipoValor: ultima.fuente.tipoValor
       });
       continue;
     }
+
+    // Esta fecha ya estaba declarada con otras reglas: es un recálculo por
+    // cambio de configuración, no una cotización nueva de la fuente.
+    const redeclaracion = Boolean(fechaNuestra) && fechaNuestra >= datos.fecha;
 
     // Guarda de variación: un salto grande es casi siempre un error de la
     // fuente, y acá termina en documentos fiscales firmados. No se aplica solo.
@@ -247,6 +350,7 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
           valorAnterior: ultima.valor,
           variacionPct: Number(variacion.toFixed(2)),
           fechaCotizacion: datos.fecha,
+          tipoValor,
           mensaje:
             `Variación de ${variacion.toFixed(2)}% sobre la vigente (${ultima.valor} → ${valor}), ` +
             `supera el máximo de ${variacionMaxima}%. No se aplicó: declarala a mano si es correcta.`
@@ -269,17 +373,35 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
         }
       });
       aplicadas++;
+      if (redeclaracion) redeclaradas++;
       resumen.monedas.push({
         moneda,
         estado: 'aplicada',
         valor: cotizacion.valor,
         valorAnterior: ultima?.valor ?? null,
-        fechaCotizacion: datos.fecha
+        fechaCotizacion: datos.fecha,
+        tipoValor,
+        mensaje: redeclaracion
+          ? `Recalculada con el valor de ${tipoValor} de la cotización del ${datos.fecha}`
+          : undefined
       });
     } catch (err) {
-      // 11000 = choque con el índice único: otro tick la declaró en paralelo
+      // 11000 = choque con un índice único: otra corrida la declaró en paralelo.
+      // En una redeclaración solo puede ser el índice único viejo por fecha, que
+      // justamente impedía recalcular: se avisa en vez de callar un 'sin cambios'.
       if (err.code === 11000) {
-        resumen.monedas.push({ moneda, estado: 'sin_cambios', fechaCotizacion: datos.fecha });
+        resumen.monedas.push(
+          redeclaracion
+            ? {
+                moneda,
+                estado: 'error',
+                fechaCotizacion: datos.fecha,
+                mensaje:
+                  'La base todavía tiene el índice único por fecha de la fuente y bloquea el recálculo. ' +
+                  'Ejecutá migrations/003-cotizaciones-sin-indice-unico.js'
+              }
+            : { moneda, estado: 'sin_cambios', fechaCotizacion: datos.fecha }
+        );
       } else {
         resumen.monedas.push({ moneda, estado: 'error', mensaje: String(err.message).slice(0, 150) });
       }
@@ -287,20 +409,25 @@ async function sincronizarEmpresa(empresa, { forzado = false, maxEdadCacheMs = 6
   }
 
   if (aplicadas > 0) {
+    const verbo = redeclaradas === aplicadas ? 'recalculada(s)' : 'actualizada(s)';
     resumen.estado = 'ok';
-    resumen.mensaje = `${aplicadas} cotización(es) actualizada(s) con la fecha ${datos.fecha}`;
+    resumen.mensaje = `${aplicadas} cotización(es) ${verbo} con la del ${datos.fecha} (valor de ${tipoValor})`;
     if (bloqueadas > 0) {
       resumen.mensaje += `; ${bloqueadas} bloqueada(s) por variación excesiva`;
     }
   } else if (bloqueadas > 0) {
     resumen.estado = 'bloqueada';
     resumen.mensaje = `${bloqueadas} cotización(es) no aplicada(s) por variación excesiva — requieren revisión`;
+  } else if (manualesDeHoy === monedas.length) {
+    resumen.estado = 'sin_cambios';
+    resumen.mensaje =
+      `${manualesDeHoy} cotización(es) declarada(s) a mano hoy: la automática no las pisa hasta mañana`;
   } else if (datos.fecha < objetivo) {
     resumen.estado = 'pendiente_fuente';
     resumen.mensaje = `La fuente todavía publica la cotización del ${datos.fecha}; se esperaba la del ${objetivo}`;
   } else {
     resumen.estado = 'sin_cambios';
-    resumen.mensaje = `Sin novedades (fecha vigente ${datos.fecha})`;
+    resumen.mensaje = `Sin novedades (cotización del ${datos.fecha}, valor de ${tipoValor})`;
   }
 
   await guardarUltimaSincronizacion(empresa, resumen);
@@ -353,6 +480,9 @@ module.exports = {
   sincronizarEmpresa,
   sincronizarTodas,
   estaAlDia,
+  yaResuelta,
+  esManual,
+  valorSegunTipo,
   fechaObjetivo,
   hoyAsuncion,
   horaAsuncion,

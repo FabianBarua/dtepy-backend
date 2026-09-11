@@ -20,6 +20,60 @@ const { evaluarPlazoCancelacion } = require('../utils/plazosSifen');
 // Todas las rutas requieren autenticación y, para API Keys, permiso de lectura
 router.use(verificarToken, verificarPermiso('facturas:leer'), cargarAlcance);
 
+const { elegibleCancelacion } = require('../services/facturaAccionesService');
+
+const TIPOS_EVENTO_VALIDOS = ['cancelacion', 'conformidad', 'disconformidad', 'desconocimiento', 'notificacion_recepcion'];
+
+/**
+ * Cancelación masiva: { ids: [...], descripcion, usuario? }.
+ * Cada documento se valida por separado (estado aprobado + plazo 48 h/168 h)
+ * y se responde un resultado por documento; un rechazo no frena a los demás.
+ */
+router.post('/bulk/cancelar', verificarPermiso('facturas:crear'), async (req, res) => {
+  try {
+    const { ids, descripcion } = req.body || {};
+    const lista = Array.isArray(ids) ? [...new Set(ids.map(String))] : [];
+    if (lista.length === 0) {
+      return res.status(400).json({ success: false, error: 'BULK_SIN_IDS', message: 'Indicá al menos un documento (ids)' });
+    }
+    if (lista.length > 200) {
+      return res.status(400).json({ success: false, error: 'BULK_DEMASIADOS', message: 'Máximo 200 documentos por operación' });
+    }
+    if (!descripcion || String(descripcion).trim().length < 5) {
+      return res.status(400).json({ success: false, error: 'EVENTO_DESCRIPCION_REQUIRED', message: 'Indicá el motivo de la cancelación (mínimo 5 caracteres)' });
+    }
+
+    const usuario = req.body.usuario || {
+      documentoNumero: req.usuario?.documento || '0',
+      nombre: req.usuario ? `${req.usuario.nombre || ''} ${req.usuario.apellido || ''}`.trim() || req.usuario.username : 'Sistema'
+    };
+
+    const docs = await Invoice.find({ _id: { $in: lista }, ...filtroEmpresa(req) });
+    const porId = new Map(docs.map(d => [String(d._id), d]));
+    const resultados = [];
+
+    for (const id of lista) {
+      const invoice = porId.get(id);
+      if (!invoice) { resultados.push({ id, ok: false, mensaje: 'No encontrado' }); continue; }
+      const elegible = elegibleCancelacion(invoice);
+      if (!elegible.ok) { resultados.push({ id, correlativo: invoice.correlativo, ok: false, mensaje: elegible.motivo }); continue; }
+      try {
+        const r = await eventoService.enviarEvento({ invoiceId: String(invoice._id), tipoEvento: 'cancelacion', descripcion, usuario });
+        const registrado = r?.estadoEvento === 'registrado' || r?.codigoRetorno === '0600';
+        resultados.push({ id, correlativo: invoice.correlativo, ok: registrado, codigoRetorno: r?.codigoRetorno, mensaje: r?.mensajeRetorno || (registrado ? 'Cancelada' : 'SET no registró el evento') });
+      } catch (error) {
+        resultados.push({ id, correlativo: invoice.correlativo, ok: false, mensaje: error.message });
+      }
+    }
+
+    const ok = resultados.filter(r => r.ok).length;
+    res.json({ success: true, message: 'Cancelación masiva terminada', total: resultados.length, ok, fallidos: resultados.length - ok, resultados });
+  } catch (error) {
+    console.error('❌ Error en cancelación masiva:', error);
+    res.status(500).json({ success: false, error: 'BULK_CANCELAR_ERROR', message: error.message });
+  }
+});
+
 /**
  * @route   POST /api/eventos/enviar
  * @desc    Enviar evento a la SET

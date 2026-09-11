@@ -87,6 +87,9 @@ const invoiceSchema = new mongoose.Schema({
     },
     digestValue: {
       type: String  // dDigVal - Digest Value de la respuesta
+    },
+    protocolo: {
+      type: String  // dProtAut - Número de protocolo de autorización (comprobante de que SET aprobó el DTE)
     }
   },
   // Estado visual para el frontend (según código de retorno)

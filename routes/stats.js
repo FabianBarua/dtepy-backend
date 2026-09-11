@@ -12,6 +12,7 @@ router.get('/', async (req, res) => {
   try {
     // Metricas restringidas a las empresas del alcance (admin ve todo)
     const alcance = filtroEmpresa(req);
+    if (req.query.rucEmpresa) alcance.rucEmpresa = String(req.query.rucEmpresa);
 
     const totalFacturas = await Invoice.countDocuments(alcance);
     const facturasPorEstado = await Invoice.aggregate([

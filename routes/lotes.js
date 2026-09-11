@@ -10,10 +10,15 @@ router.use(verificarToken, verificarPermiso('facturas:leer'), cargarAlcance);
 
 router.get('/list', async (req, res) => {
   try {
-    const { estado, empresaId, tipoDocumento, page = 1, limit = 20 } = req.query;
+    const { estado, empresaId, tipoDocumento, page = 1, limit = 20, rucEmpresa } = req.query;
     const filtro = {};
     if (estado) filtro.estado = estado;
     if (empresaId) filtro.empresaId = empresaId;
+    if (rucEmpresa) {
+      const Empresa = require('../models/Empresa');
+      const empresa = await Empresa.findOne({ ruc: String(rucEmpresa) }).select('_id');
+      filtro.empresaId = empresa ? empresa._id : null;
+    }
     if (tipoDocumento) filtro.tipoDocumento = parseInt(tipoDocumento);
 
     const options = {

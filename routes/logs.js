@@ -7,7 +7,7 @@ router.use(verificarToken, verificarPermiso('stats:leer'));
 
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 15, estado, tipoOperacion, invoiceId } = req.query;
+    const { page = 1, limit = 15, estado, tipoOperacion, invoiceId, search } = req.query;
 
     const options = {
       page: parseInt(page),
@@ -24,6 +24,11 @@ router.get('/', async (req, res) => {
     }
     if (invoiceId) {
       filtro.invoiceId = invoiceId;
+    }
+    if (search) {
+      // Texto literal (sin esto, un patrón hostil permite ReDoS)
+      const re = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filtro.$or = [{ descripcion: re }, { tipoOperacion: re }];
     }
 
     const skip = (options.page - 1) * options.limit;

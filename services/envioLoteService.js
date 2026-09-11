@@ -215,6 +215,8 @@ async function consultarResultadoLote(loteId) {
       const msgRes = campoRespuesta(bloque, 'dMsgRes');
       const codRes = campoRespuesta(bloque, 'dCodRes');
       const cdcResp = campoRespuesta(bloque, 'dCDCGestion');
+      const protAut = campoRespuesta(bloque, 'dProtAut');
+      const fecProc = campoRespuesta(soapResponse, 'dFecProc');
 
       let estadoIndividual;
       let estadoVisual;
@@ -235,12 +237,18 @@ async function consultarResultadoLote(loteId) {
       lote.facturas[i].estadoIndividual = estadoIndividual;
 
       const facturaIdNotificar = lote.facturas[i].facturaId;
-      Invoice.findByIdAndUpdate(facturaIdNotificar, {
+      // Comprobante de lo que SET respondio: fecha de proceso y numero de
+      // protocolo de autorizacion quedan en el registro (antes solo estaban
+      // en la respuesta cruda del lote).
+      const actualizacion = {
         estadoSifen: estadoIndividual,
         estadoVisual: estadoVisual,
         mensajeRetorno: msgRes,
-        codigoRetorno: codRes
-      }).then(async () => {
+        codigoRetorno: codRes,
+        respuestaSifen: { codigo: codRes, estado: estRes, mensaje: msgRes, fechaProceso: fecProc || null, protocolo: protAut || null }
+      };
+      if (fecProc) actualizacion.fechaProceso = fecProc;
+      Invoice.findByIdAndUpdate(facturaIdNotificar, actualizacion).then(async () => {
         // Rechazo: el documento no existe en SET, así que su número vuelve al
         // contador en vez de quedar como hueco a inutilizar.
         if (estadoIndividual === 'rechazado') {

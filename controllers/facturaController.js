@@ -28,7 +28,10 @@ exports.crear = async (req, res) => {
       }
     }
 
-    const resultado = await crearFactura(req.body);
+    // Idempotency-Key (header estándar): si la respuesta de un POST anterior se
+    // perdió, repetirlo con la misma clave devuelve la factura ya creada en
+    // vez de emitir otra con otro número.
+    const resultado = await crearFactura(req.body, { claveIdempotencia: req.get('Idempotency-Key') });
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     const facturaId = resultado.facturaId;
 
@@ -45,6 +48,15 @@ exports.crear = async (req, res) => {
         consulta: `/api/invoices/${facturaId}`
       }
     };
+
+    if (resultado.tipo === 'idempotente') {
+      data.idempotente = true;
+      return res.status(200).json({
+        success: true,
+        message: 'La factura ya existía para esta Idempotency-Key: se devuelve la existente, no se creó otra',
+        data
+      });
+    }
 
     if (resultado.tipo === 'pdf_regeneracion') {
       data.kudeJobId = resultado.kudeJobId;

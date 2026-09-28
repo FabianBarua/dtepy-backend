@@ -113,6 +113,15 @@ const invoiceSchema = new mongoose.Schema({
     required: true,
     unique: true  // ← El hash SÍ debe ser único (combina todos los campos oficiales)
   },
+  // Header Idempotency-Key con que la integración pidió la emisión. Una
+  // repetición con la misma clave devuelve esta factura en vez de crear otra
+  // (facturaService.crearFactura). No es único: tras un rechazo o una
+  // cancelación la misma clave emite de nuevo y manda la más reciente vigente.
+  claveIdempotencia: {
+    type: String,
+    index: true,
+    sparse: true
+  },
   // ========================================
   // CAMPO PARA CONTROL DE PROCESO
   // ========================================

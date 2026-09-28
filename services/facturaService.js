@@ -52,6 +52,47 @@ function generarFacturaHash(datosFactura, empresa) {
 // un documento emitido; lo que corresponde es emitir con otro número.
 const ESTADOS_FINALES_EN_SET = ['aceptado', 'observado', 'cancelado'];
 
+// ── Idempotency-Key ──────────────────────────────────────────────────
+// Si la respuesta de /crear se pierde (timeout de red), el reintento de la
+// integración creaba OTRA factura con otro número. Con el header estándar
+// `Idempotency-Key`, una repetición devuelve la factura que ya existe.
+const LARGO_MAXIMO_CLAVE_IDEMPOTENCIA = 200;
+// Una factura en uno de estos estados ya no retiene su clave y se emite de
+// nuevo: el documento no existe en SET o fue anulado (una venta cuya factura
+// se canceló se vuelve a facturar con la misma clave).
+const ESTADOS_CLAVE_LIBERADA = [...ESTADOS_NUNCA_EN_SET, 'cancelado'];
+
+/**
+ * Normaliza el valor del header Idempotency-Key: recorta espacios; vacío o
+ * ausente → null (se ignora). Más de 200 caracteres → 400, sin recortar:
+ * truncarla podría hacer coincidir dos claves distintas.
+ */
+function normalizarClaveIdempotencia(valor) {
+  if (valor === undefined || valor === null) return null;
+  const clave = String(valor).trim();
+  if (!clave) return null;
+  if (clave.length > LARGO_MAXIMO_CLAVE_IDEMPOTENCIA) {
+    throw Object.assign(
+      new Error(`El header Idempotency-Key admite hasta ${LARGO_MAXIMO_CLAVE_IDEMPOTENCIA} caracteres (llegaron ${clave.length})`),
+      { statusCode: 400, errorCode: 'IDEMPOTENCY_KEY_INVALIDA' }
+    );
+  }
+  return clave;
+}
+
+/**
+ * La factura más reciente de la empresa con esa clave que todavía la retiene
+ * (no rechazada, en error ni cancelada). Se filtra por estado en la consulta
+ * y no mirando solo la última: si una vieja volvió a estar vigente (reintento
+ * desde el panel) mientras la nueva se rechazaba, la clave sigue tomada y no
+ * se emite un duplicado.
+ */
+function buscarVigentePorClave(empresaId, claveIdempotencia) {
+  return Invoice.findOne({ empresaId, claveIdempotencia, estadoSifen: { $nin: ESTADOS_CLAVE_LIBERADA } })
+    .sort({ createdAt: -1, _id: -1 })
+    .select('correlativo estadoSifen proceso cdc');
+}
+
 function snapshotCliente(cliente, validacionReceptor) {
   return {
     // `ruc` conserva el fallback histórico porque la búsqueda del listado
@@ -175,11 +216,20 @@ async function asignarNumeroCorrelativo(empresa, datosFactura) {
   });
 }
 
+/**
+ * Total provisorio del documento, para listados, estadísticas y el webhook
+ * hasta que se genera el XML (procesarFacturaService lo reemplaza por el
+ * dTotGralOpe real). Si el total sale de los ítems, el descuento y el
+ * anticipo globales se restan: xmlgen los reparte entre los ítems y el
+ * documento factura el neto.
+ */
 function calcularTotal(datosFactura) {
   const data = datosFactura.data || datosFactura;
-  return data.totalPago || data.total ||
-         datosFactura.totalPago || datosFactura.total ||
-         (data.items?.reduce((sum, item) => sum + (item.precioTotal || item.precioUnitario * item.cantidad || 0), 0) || 0);
+  const totalInformado = data.totalPago || data.total || datosFactura.totalPago || datosFactura.total;
+  if (totalInformado) return totalInformado;
+
+  const totalItems = data.items?.reduce((sum, item) => sum + (item.precioTotal || item.precioUnitario * item.cantidad || 0), 0) || 0;
+  return totalItems - (Number(data.descuentoGlobal) || 0) - (Number(data.anticipoGlobal) || 0);
 }
 
 async function encolarFactura(facturaId, datosFactura, empresaId) {
@@ -230,8 +280,14 @@ async function registrarValidacionReceptor(invoiceId, validacionReceptor) {
   }
 }
 
-async function crearFactura(datosFactura) {
+/**
+ * @param {object} datosFactura  payload de /api/facturar/crear ({ param, data })
+ * @param {object} [opciones]
+ * @param {string} [opciones.claveIdempotencia]  header Idempotency-Key
+ */
+async function crearFactura(datosFactura, opciones = {}) {
   const data = datosFactura.data || datosFactura;
+  const claveIdempotencia = normalizarClaveIdempotencia(opciones.claveIdempotencia);
 
   normalizarFechasEnObjeto(data);
 
@@ -244,6 +300,26 @@ async function crearFactura(datosFactura) {
 
   const empresa = await buscarEmpresaPorRUC(rucEmpresa);
   validarEmpresaActiva(empresa);
+
+  // Repetición de una emisión que ya existe: se devuelve esa factura sin
+  // numerar ni encolar nada. Va antes de validar el certificado y el payload
+  // para que la repetición conteste lo mismo aunque algo haya cambiado desde
+  // el pedido original (p. ej. el certificado venció en el medio).
+  if (claveIdempotencia) {
+    const previa = await buscarVigentePorClave(empresa._id, claveIdempotencia);
+    if (previa) {
+      console.log(`🔁 Idempotency-Key repetida: se devuelve la factura ${previa.correlativo} (${previa.estadoSifen})`);
+      return {
+        tipo: 'idempotente',
+        facturaId: previa._id,
+        correlativo: previa.correlativo,
+        estado: previa.estadoSifen,
+        proceso: previa.proceso ?? null,
+        cdc: previa.cdc || null
+      };
+    }
+  }
+
   validarCertificadoValido(empresa);
 
   // Política de monedas: SIFEN acepta cualquier ISO 4217, pero la
@@ -440,6 +516,8 @@ async function crearFactura(datosFactura) {
     facturaExistente.digestValue = null;
     facturaExistente.fechaProceso = null;
     facturaExistente.respuestaSifen = {};
+    // Sin clave (p. ej. el reintento desde el panel) se conserva la que tenía.
+    if (claveIdempotencia) facturaExistente.claveIdempotencia = claveIdempotencia;
 
     const estadoAnterior = estadoAnteriorReintento;
     const mensajeAnterior = mensajeAnteriorReintento;
@@ -475,7 +553,8 @@ async function crearFactura(datosFactura) {
     datosFactura,
     facturaHash,
     de: deDescripcion,
-    tipoEmision: tipoEmisionVal
+    tipoEmision: tipoEmisionVal,
+    ...(claveIdempotencia ? { claveIdempotencia } : {})
   });
 
   await invoice.save();
@@ -495,4 +574,12 @@ async function crearFactura(datosFactura) {
   };
 }
 
-module.exports = { crearFactura, tiposDocumentoMap, generarFacturaHash, construirCorrelativo, validarPuntoHabilitado };
+module.exports = {
+  crearFactura,
+  tiposDocumentoMap,
+  generarFacturaHash,
+  construirCorrelativo,
+  validarPuntoHabilitado,
+  calcularTotal,
+  normalizarClaveIdempotencia
+};

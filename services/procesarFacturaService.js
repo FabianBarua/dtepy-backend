@@ -22,6 +22,7 @@ const {
   determinarEstadoSegunCodigo,
   determinarEstadoVisual
 } = require('../utils/estadoSifen');
+const { aplicaRedondeoSedeco } = require('../utils/redondeoSedeco');
 
 // Librerías SIFEN
 const FacturaElectronicaPY = require('facturacionelectronicapy-xmlgen').default;
@@ -32,6 +33,19 @@ const { generarKudePdf } = require('./kudeRunner');
 // Importar wrapper de SET API (soporta Mock y Producción)
 const setApi = require('./setapi-wrapper');
 const envioLoteService = require('./envioLoteService');
+
+/**
+ * Total general del documento (dTotGralOpe, F014) tal como quedó en el XML:
+ * ítems menos descuentos y anticipos, menos el redondeo SEDECO si aplicó.
+ * Es lo que realmente se factura. null si el XML no lo trae (nota de
+ * remisión) o no es un número.
+ */
+function extraerTotalGeneral(xml) {
+  const coincidencia = String(xml || '').match(/<(?:\w+:)?dTotGralOpe>\s*([^<]+?)\s*<\/(?:\w+:)?dTotGralOpe>/);
+  if (!coincidencia) return null;
+  const total = Number(coincidencia[1]);
+  return Number.isFinite(total) ? total : null;
+}
 
 /**
  * Procesa una factura electrónica completa
@@ -146,7 +160,15 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
     // La librería facturacionelectronicapy-xmlgen NO acepta fechas con 'Z' o milisegundos
     convertirFechasASIFEN(datosCompletos);  // ← Modifica el objeto en su lugar (sin reasignar)
 
-    const xmlGenerado = await FacturaElectronicaPY.generateXMLDE(params, datosCompletos, {});
+    // xmlgen redondea a múltiplos de 50 Gs por defecto; solo corresponde con
+    // pago 100 % en efectivo (utils/redondeoSedeco.js).
+    const redondeoSedeco = aplicaRedondeoSedeco(datosCompletos);
+    console.log(`🧮 Redondeo SEDECO: ${redondeoSedeco ? 'aplicado (pago en efectivo)' : 'no aplica'}`);
+
+    const xmlGenerado = await FacturaElectronicaPY.generateXMLDE(params, datosCompletos, { redondeoSedeco });
+    // El total que calculó facturaService es provisorio (sale del payload); el
+    // del XML es el del documento, con descuentos y redondeo incluidos.
+    const totalDocumento = extraerTotalGeneral(xmlGenerado);
     await reportarProgreso(35);
 
     // ========================================
@@ -200,6 +222,7 @@ async function procesarFactura(datosFactura, empresaId, job = null, invoiceId = 
           if (Object.keys(updateData).length > 0) {
             await Invoice.findByIdAndUpdate(invoiceId, {
               ...updateData,
+              ...(totalDocumento !== null ? { total: totalDocumento } : {}),
               estadoSifen: 'enviado'  // Cambiar a 'enviado' mientras se procesa en SET
             });
           } else {
@@ -535,5 +558,6 @@ async function generarKUDE(xmlContenido, cdc, correlativo, fechaCreacion, datosF
 
 module.exports = {
   procesarFactura,
-  generarKUDE
+  generarKUDE,
+  extraerTotalGeneral
 };

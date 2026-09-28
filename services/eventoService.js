@@ -242,6 +242,12 @@ async function enviarEvento(params) {
       invoice.estadoSifen = 'cancelado';
       await invoice.save();
       console.log(`🚫 Factura ${invoice.correlativo} marcada como cancelada`);
+
+      // Estado final nuevo: la integración se entera por el webhook (sin
+      // email: el KUDE solo se manda para aceptado/observado). Es el único
+      // lugar que cancela: /api/eventos/enviar y /bulk/cancelar pasan por acá.
+      const { notificarFacturaFinal } = require('./notificacionService');
+      notificarFacturaFinal(invoice._id.toString());
     }
 
     // ========================================

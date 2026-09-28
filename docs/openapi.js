@@ -515,6 +515,15 @@ exterior (obligatoria).
 6. Anulación (hasta 48 h): \`POST /api/eventos/enviar\` con
    \`tipoEvento: "cancelacion"\`.
 `.trim(),
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: false,
+            schema: { type: 'string', maxLength: 200 },
+            description: 'Opcional, una por venta/documento. Si la empresa ya tiene una factura con esa clave que no está rechazada, en error ni cancelada, se devuelve esa (la más reciente; `200`, `data.idempotente: true`) en vez de crear otra: reintentar tras un timeout no duplica. Si todas las de esa clave están rechazadas, en error o canceladas, se emite normalmente. Se recortan espacios; vacía se ignora; más de 200 caracteres → `400 IDEMPOTENCY_KEY_INVALIDA`.'
+          }
+        ],
         requestBody: {
           required: true,
           content: {
@@ -522,6 +531,7 @@ exterior (obligatoria).
           }
         },
         responses: {
+          200: okJson('Ya existía una factura para esa Idempotency-Key: se devuelve la existente, no se crea otra', ref('FacturaEncolada')),
           202: okJson('Encolada para procesamiento', ref('FacturaEncolada')),
           400: respuestaError('Datos inválidos o empresa sin certificado'),
           401: NO_AUTORIZADO,
@@ -1973,7 +1983,8 @@ día en curso manda.
                 }
               },
               reintentando: { type: 'boolean', description: 'Presente cuando el correlativo ya existía en error y se reintenta' },
-              kudeJobId: { type: 'string', description: 'Presente cuando la factura ya estaba aprobada y solo se regenera el PDF' }
+              kudeJobId: { type: 'string', description: 'Presente cuando la factura ya estaba aprobada y solo se regenera el PDF' },
+              idempotente: { type: 'boolean', description: 'Presente (true) cuando la Idempotency-Key ya tenía factura y se devuelve esa' }
             }
           }
         }
@@ -2539,7 +2550,7 @@ día en curso manda.
           },
           notificaciones: {
             type: 'object',
-            description: 'Notificaciones al integrador cuando una factura llega a estado final (aceptado/observado/rechazado/error).',
+            description: 'Notificaciones al integrador cuando una factura llega a estado final (aceptado/observado/rechazado/error/cancelado; el email del KUDE solo para aceptado/observado).',
             properties: {
               webhookUrl: {
                 type: 'string',

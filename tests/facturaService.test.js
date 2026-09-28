@@ -10,7 +10,7 @@ require.cache[rutaColas] = {
   exports: { facturaQueue: {}, kudeQueue: {} }
 };
 
-const { generarFacturaHash, construirCorrelativo, validarPuntoHabilitado } = require('../services/facturaService');
+const { generarFacturaHash, construirCorrelativo, validarPuntoHabilitado, calcularTotal } = require('../services/facturaService');
 
 const empresa = { ruc: '80055783-2', configuracionSifen: { timbrado: '18646542' } };
 const payload = (data) => ({ param: { ruc: '80055783-2' }, data });
@@ -109,4 +109,48 @@ test('un establecimiento no registrado se rechaza con 400', () => {
       return true;
     }
   );
+});
+
+// ── Total guardado ──────────────────────────────────────────────────
+// Es el total provisorio (listados, estadísticas, webhook) hasta que el
+// worker genera el XML y lo reemplaza por dTotGralOpe.
+
+test('total desde los ítems: precio × cantidad', () => {
+  assert.equal(calcularTotal(payload({ items: [{ precioUnitario: 100000, cantidad: 2 }, { precioUnitario: 35000, cantidad: 1 }] })), 235000);
+});
+
+test('total desde los ítems: se restan el descuento y el anticipo globales (lo que factura el documento)', () => {
+  const items = [{ precioUnitario: 3000000, cantidad: 2 }];
+  assert.equal(calcularTotal(payload({ items, descuentoGlobal: 150000 })), 5850000);
+  assert.equal(calcularTotal(payload({ items, anticipoGlobal: 1000000 })), 5000000);
+  assert.equal(calcularTotal(payload({ items, descuentoGlobal: 150000, anticipoGlobal: 1000000 })), 4850000);
+  // como string, como los manda más de una integración
+  assert.equal(calcularTotal(payload({ items, descuentoGlobal: '150000' })), 5850000);
+});
+
+test('el caso de la tienda: recargo negativo del medio de pago como descuento global', () => {
+  const data = {
+    moneda: 'PYG',
+    items: [
+      { precioUnitario: 5500000, cantidad: 1 },
+      { precioUnitario: 431791, cantidad: 1 }
+    ],
+    descuentoGlobal: 118636
+  };
+  assert.equal(calcularTotal(payload(data)), 5813155);
+});
+
+test('USD: el descuento global también se resta', () => {
+  assert.equal(calcularTotal(payload({ moneda: 'USD', items: [{ precioUnitario: 1000, cantidad: 1 }], descuentoGlobal: 50 })), 950);
+});
+
+test('un total informado por la integración se respeta tal cual (ya es neto)', () => {
+  const items = [{ precioUnitario: 3000000, cantidad: 2 }];
+  assert.equal(calcularTotal(payload({ items, descuentoGlobal: 150000, total: 5850000 })), 5850000);
+  assert.equal(calcularTotal(payload({ items, descuentoGlobal: 150000, totalPago: 5850000 })), 5850000);
+});
+
+test('sin ítems ni descuentos el total es 0; precioTotal del ítem manda sobre precio × cantidad', () => {
+  assert.equal(calcularTotal(payload({})), 0);
+  assert.equal(calcularTotal(payload({ items: [{ precioTotal: 90000, precioUnitario: 50000, cantidad: 2 }], descuentoGlobal: 10000 })), 80000);
 });

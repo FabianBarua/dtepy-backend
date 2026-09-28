@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { ocultarCredenciales } = require('../utils/ocultarCredenciales');
 const mongoose = require('mongoose');
 const envioLoteService = require('../services/envioLoteService');
 
@@ -53,7 +54,7 @@ async function procesarLotes() {
 setInterval(procesarLotes, INTERVALO_MS);
 
 console.log(`👷 [LOTE-WORKER] Iniciado - envía lotes con espera > ${ESPERA_MAX_MS / 1000}s y consulta cada ${INTERVALO_MS / 1000}s`);
-console.log(`📍 MongoDB: ${MONGODB_URI}`);
+console.log(`📍 MongoDB: ${ocultarCredenciales(MONGODB_URI)}`);
 
 process.on('SIGINT', async () => {
   console.log('\n🛑 [LOTE-WORKER] Cerrando...');

@@ -19,6 +19,7 @@
  */
 
 require('dotenv').config();
+const { ocultarCredenciales } = require('../utils/ocultarCredenciales');
 const mongoose = require('mongoose');
 const cotizacionSync = require('../services/cotizacionSyncService');
 
@@ -106,7 +107,7 @@ console.log('👷 ========================================');
 console.log(`⏱️  Ventana activa ${String(VENTANA_DESDE).padStart(2, '0')}:00-${String(VENTANA_HASTA).padStart(2, '0')}:00 (Asunción): cada ${INTERVALO_ACTIVO_MS / 60000} min`);
 console.log(`⏱️  Resto del día: cada ${INTERVALO_REPOSO_MS / 60000} min`);
 console.log(`📅 Cotización objetivo de hoy: la publicada el ${cotizacionSync.fechaObjetivo()}`);
-console.log(`📍 MongoDB: ${MONGODB_URI}`);
+console.log(`📍 MongoDB: ${ocultarCredenciales(MONGODB_URI)}`);
 console.log('=========================================\n');
 
 // Primer chequeo al arrancar (cubre el caso de un despliegue en plena ventana)

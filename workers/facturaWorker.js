@@ -8,6 +8,7 @@
  */
 
 require('dotenv').config();
+const { ocultarCredenciales } = require('../utils/ocultarCredenciales');
 const mongoose = require('mongoose');
 const { facturaQueue, kudeQueue, describirRedis } = require('../queues/facturaQueue');
 const { procesarFactura, generarKUDE } = require('../services/procesarFacturaService');
@@ -378,6 +379,6 @@ console.log('\n👷 ========================================');
 console.log('👷   WORKER DE FACTURACIÓN INICIADO');
 console.log('👷 ========================================');
 console.log(`📍 Redis: ${describirRedis()}`);
-console.log(`📍 MongoDB: ${MONGODB_URI}`);
+console.log(`📍 MongoDB: ${ocultarCredenciales(MONGODB_URI)}`);
 console.log('📋 Escuchando jobs de facturación...');
 console.log('=========================================\n');

@@ -136,9 +136,11 @@ Además hay operaciones **vedadas a las API Keys** sin importar sus permisos:
 ### Alcance multi-empresa
 
 Facturas, eventos, lotes y estadísticas se limitan a las **empresas del
-token**: un admin ve todo el sistema; los demás usuarios solo sus empresas;
+token**: un admin ve todo el sistema; los demás usuarios, las empresas que
+crearon y las que un admin les compartió (Usuarios → Empresas con acceso);
 una API Key, las empresas de su dueño (o únicamente la empresa a la que esté
-asociada). Los documentos fuera del alcance responden \`404\`.
+asociada). El acceso compartido permite operar los documentos de la empresa,
+no cambiar su configuración ni su certificado. Los documentos fuera del alcance responden \`404\`.
 
 ### Límites
 

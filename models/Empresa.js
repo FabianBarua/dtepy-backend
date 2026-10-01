@@ -238,6 +238,15 @@ const empresaSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+
+  // Usuarios (además del dueño) que ven la empresa y operan sus documentos.
+  // No pueden cambiar la configuración ni el certificado. Lo administra un
+  // admin desde Usuarios.
+  usuariosConAcceso: {
+    type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    default: [],
+    index: true
+  },
   
   // Datos de contacto
   direccion: String,

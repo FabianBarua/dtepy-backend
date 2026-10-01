@@ -1,27 +1,63 @@
 /**
  * Alcance multi-empresa: qué empresas puede ver el token autenticado.
  *
- * Las empresas ya estaban scopeadas por dueño (usuarioId), pero facturas,
- * eventos, lotes y estadísticas se consultaban sin filtro: cualquier usuario
- * autenticado veía los datos de las empresas de los demás. Este middleware
- * cierra eso.
+ * Una empresa tiene un dueño (`usuarioId`) y, además, una lista de usuarios
+ * con acceso (`usuariosConAcceso`) que el administrador gestiona desde
+ * Usuarios. Quien tiene acceso compartido ve la empresa y opera sus
+ * documentos (consultar, emitir, cancelar), pero no cambia su configuración
+ * ni su certificado: eso queda para el dueño y los administradores.
  *
  * Reglas:
  *   - Sesión JWT de un admin        → sin restricción (ve todo el sistema).
- *   - Sesión JWT de otro rol        → solo sus propias empresas.
+ *   - Sesión JWT de otro rol        → sus empresas + las compartidas con él.
  *   - API Key atada a una empresa   → solo esa empresa.
- *   - API Key sin empresa asociada  → todas las empresas de su dueño.
+ *   - API Key sin empresa asociada  → las empresas de su dueño + las
+ *                                     compartidas con él (nunca "todo": una
+ *                                     key filtrada de un admin no abre el
+ *                                     sistema entero).
  *
  * Uso: aplicar `cargarAlcance` después de verificarToken, y en los handlers
  * usar `filtroEmpresa(req)` para listados/agregaciones y
- * `perteneceAlAlcance(req, empresaId)` para documentos puntuales.
+ * `perteneceAlAlcance(req, empresaId)` para documentos puntuales. Para la
+ * colección de empresas en sí: `filtroEmpresasVisibles(req)` (leer) y
+ * `filtroEmpresasAdministrables(req)` (configurar, certificado, eliminar).
  */
 
 const Empresa = require('../models/Empresa');
 
+const esSesionAdmin = (req) => req.tipoAutenticacion === 'jwt' && req.usuario?.rol === 'admin';
+
+/** Empresas de un usuario: las que creó y las que le compartieron. */
+function condicionAccesoDe(usuarioId) {
+  return { $or: [{ usuarioId }, { usuariosConAcceso: usuarioId }] };
+}
+
+/** Filtro sobre la colección `empresas`: las que este token puede VER. */
+function filtroEmpresasVisibles(req) {
+  if (esSesionAdmin(req)) return {};
+  if (req.apiKey?.empresaId) return { _id: req.apiKey.empresaId };
+  return condicionAccesoDe(req.usuario._id);
+}
+
+/** Filtro sobre la colección `empresas`: las que este token puede CONFIGURAR. */
+function filtroEmpresasAdministrables(req) {
+  if (esSesionAdmin(req)) return {};
+  return { usuarioId: req.usuario._id };
+}
+
+/**
+ * Relación del token con una empresa que ya pasó el filtro de visibles:
+ * 'propietario' | 'administrador' | 'compartida'.
+ */
+function tipoAccesoEmpresa(req, empresa) {
+  if (String(empresa.usuarioId?._id ?? empresa.usuarioId) === String(req.usuario._id)) return 'propietario';
+  if (esSesionAdmin(req)) return 'administrador';
+  return 'compartida';
+}
+
 async function cargarAlcance(req, res, next) {
   try {
-    if (req.tipoAutenticacion === 'jwt' && req.usuario.rol === 'admin') {
+    if (esSesionAdmin(req)) {
       req.alcance = { total: true, ids: null };
       return next();
     }
@@ -31,7 +67,7 @@ async function cargarAlcance(req, res, next) {
       return next();
     }
 
-    const empresas = await Empresa.find({ usuarioId: req.usuario._id }).select('_id');
+    const empresas = await Empresa.find(condicionAccesoDe(req.usuario._id)).select('_id');
     req.alcance = { total: false, ids: empresas.map((e) => e._id) };
     next();
   } catch (error) {
@@ -76,4 +112,13 @@ async function empresaParaConsultas(req) {
   return Empresa.findOne(filtro).sort({ updatedAt: -1 });
 }
 
-module.exports = { cargarAlcance, filtroEmpresa, perteneceAlAlcance, empresaParaConsultas };
+module.exports = {
+  cargarAlcance,
+  filtroEmpresa,
+  perteneceAlAlcance,
+  empresaParaConsultas,
+  condicionAccesoDe,
+  filtroEmpresasVisibles,
+  filtroEmpresasAdministrables,
+  tipoAccesoEmpresa
+};

@@ -4,6 +4,7 @@
  */
 
 const Empresa = require('../models/Empresa');
+const { filtroEmpresasVisibles, filtroEmpresasAdministrables, tipoAccesoEmpresa } = require('../middleware/alcance');
 const certificadoService = require('../services/certificadoService');
 const Invoice = require('../models/Invoice');
 const LoteEnvio = require('../models/LoteEnvio');
@@ -120,12 +121,31 @@ function validarDatosEmisor({ configuracionSifen, actividadesEconomicas, estable
 }
 
 /**
- * Listar todas las empresas del usuario autenticado
+ * Empresa tal como la ve este token: agrega `acceso` (propietario |
+ * administrador | compartida) y `puedeAdministrar`. Quien solo tiene acceso
+ * compartido opera los documentos pero no ve los secretos de la empresa
+ * (CSC, secreto del webhook) ni la lista de quiénes más tienen acceso.
+ */
+function vistaEmpresa(req, empresa) {
+  const obj = empresa.toObject();
+  obj.acceso = tipoAccesoEmpresa(req, empresa);
+  obj.puedeAdministrar = obj.acceso !== 'compartida';
+  if (!obj.puedeAdministrar) {
+    if (obj.configuracionSifen) delete obj.configuracionSifen.csc;
+    if (obj.notificaciones) delete obj.notificaciones.webhookSecret;
+    delete obj.usuariosConAcceso;
+  }
+  return obj;
+}
+
+/**
+ * Listar las empresas que ve el usuario autenticado: las propias, las
+ * compartidas con él y, si es admin, todas.
  * GET /api/empresas
  */
 exports.listar = async (req, res) => {
   try {
-    const empresas = await Empresa.find({ usuarioId: req.usuario._id })
+    const empresas = await Empresa.find(filtroEmpresasVisibles(req))
       .select('-certificado.contrasena')
       .sort({ nombreFantasia: 1 });
     
@@ -133,7 +153,7 @@ exports.listar = async (req, res) => {
     const empresasConInfo = empresas.map(empresa => {
       const infoCertificado = certificadoService.obtenerInfoCertificado(empresa.ruc);
       return {
-        ...empresa.toObject(),
+        ...vistaEmpresa(req, empresa),
         certificadoEnFileSystem: infoCertificado?.existe || false
       };
     });
@@ -162,7 +182,7 @@ exports.obtener = async (req, res) => {
     
     const empresa = await Empresa.findOne({
       _id: id,
-      usuarioId: req.usuario._id
+      ...filtroEmpresasVisibles(req)
     }).select('-certificado.contrasena');
     
     if (!empresa) {
@@ -178,7 +198,7 @@ exports.obtener = async (req, res) => {
     res.json({
       success: true,
       data: {
-        ...empresa.toObject(),
+        ...vistaEmpresa(req, empresa),
         certificadoEnFileSystem: infoCertificado?.existe || false
       }
     });
@@ -306,14 +326,9 @@ exports.actualizar = async (req, res) => {
     if (errorEmisor) {
       return res.status(400).json({ success: false, error: errorEmisor });
     }
-    const errorNotif = await validarNotificaciones(notificaciones, req.usuario._id);
-    if (errorNotif) {
-      return res.status(400).json({ success: false, error: errorNotif });
-    }
-
     const empresa = await Empresa.findOne({
       _id: id,
-      usuarioId: req.usuario._id
+      ...filtroEmpresasAdministrables(req)
     });
 
     if (!empresa) {
@@ -321,6 +336,13 @@ exports.actualizar = async (req, res) => {
         success: false,
         error: 'Empresa no encontrada'
       });
+    }
+
+    // El proveedor SMTP tiene que ser del dueño de la empresa: quien edita
+    // puede ser un administrador que no es el dueño.
+    const errorNotif = await validarNotificaciones(notificaciones, empresa.usuarioId);
+    if (errorNotif) {
+      return res.status(400).json({ success: false, error: errorNotif });
     }
 
     // Actualizar RUC si se proporciona y es diferente
@@ -461,7 +483,7 @@ exports.subirCertificado = async (req, res) => {
     
     const empresa = await Empresa.findOne({
       _id: id,
-      usuarioId: req.usuario._id
+      ...filtroEmpresasAdministrables(req)
     });
     
     if (!empresa) {
@@ -517,7 +539,7 @@ exports.validarCertificado = async (req, res) => {
     
     const empresa = await Empresa.findOne({
       _id: id,
-      usuarioId: req.usuario._id
+      ...filtroEmpresasVisibles(req)
     });
     
     if (!empresa) {
@@ -563,7 +585,7 @@ exports.eliminar = async (req, res) => {
     
     const empresa = await Empresa.findOne({
       _id: id,
-      usuarioId: req.usuario._id
+      ...filtroEmpresasAdministrables(req)
     });
     
     if (!empresa) {
@@ -633,7 +655,7 @@ exports.obtenerStats = async (req, res) => {
     
     const empresa = await Empresa.findOne({
       _id: id,
-      usuarioId: req.usuario._id
+      ...filtroEmpresasVisibles(req)
     });
     
     if (!empresa) {

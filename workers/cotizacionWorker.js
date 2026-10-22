@@ -20,6 +20,7 @@
 
 require('dotenv').config();
 const { ocultarCredenciales } = require('../utils/ocultarCredenciales');
+const { conectarMongo } = require('../utils/conectarMongo');
 const mongoose = require('mongoose');
 const cotizacionSync = require('../services/cotizacionSyncService');
 
@@ -30,12 +31,7 @@ const INTERVALO_REPOSO_MS = parseInt(process.env.COTIZACION_INTERVALO_REPOSO_MS 
 const VENTANA_DESDE = parseInt(process.env.COTIZACION_VENTANA_DESDE || '0', 10);
 const VENTANA_HASTA = parseInt(process.env.COTIZACION_VENTANA_HASTA || '6', 10);
 
-mongoose.connect(MONGODB_URI, {
-  maxPoolSize: 5,
-  serverSelectionTimeoutMS: 5000
-})
-  .then(() => console.log('✅ [COTIZACION-WORKER] MongoDB conectado'))
-  .catch((err) => console.error('❌ [COTIZACION-WORKER] Error conectando a MongoDB:', err.message));
+conectarMongo({ uri: MONGODB_URI, etiqueta: '[COTIZACION-WORKER]', opciones: { maxPoolSize: 5 } });
 
 function enVentanaActiva() {
   const hora = cotizacionSync.horaAsuncion();

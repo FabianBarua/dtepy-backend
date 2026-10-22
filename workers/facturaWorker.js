@@ -9,6 +9,7 @@
 
 require('dotenv').config();
 const { ocultarCredenciales } = require('../utils/ocultarCredenciales');
+const { conectarMongo } = require('../utils/conectarMongo');
 const mongoose = require('mongoose');
 const { facturaQueue, kudeQueue, describirRedis } = require('../queues/facturaQueue');
 const { procesarFactura, generarKUDE } = require('../services/procesarFacturaService');
@@ -24,14 +25,7 @@ const fs = require('fs');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/sifen_db';
 
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  maxPoolSize: 10,
-  serverSelectionTimeoutMS: 5000
-})
-.then(() => console.log('✅ [WORKER] MongoDB conectado'))
-.catch(err => console.error('❌ [WORKER] Error conectando a MongoDB:', err.message));
+conectarMongo({ uri: MONGODB_URI, etiqueta: '[WORKER]', opciones: { maxPoolSize: 10 } });
 
 // ========================================
 // PROCESADOR DE FACTURAS

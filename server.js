@@ -11,6 +11,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { sanitizarMongo } = require('./middleware/sanitizarMongo');
+const { conectarMongo } = require('./utils/conectarMongo');
 
 // Configurar Express
 const app = express();
@@ -160,18 +161,9 @@ app.get('/api/health', (req, res) => {
 // Conectar a MongoDB
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/sifen_db';
 
-const connectDB = async () => {
-  try {
-    await mongoose.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log('✅ Conectado a MongoDB');
-  } catch (error) {
-    console.error('❌ Error conectando a MongoDB:', error.message);
-    process.exit(1);
-  }
-};
+// Reintenta hasta conectar: si el contenedor arranca antes que MongoDB (p. ej.
+// tras un reinicio del servidor), el proceso HTTP espera en vez de morir.
+const connectDB = () => conectarMongo({ uri: MONGODB_URI, etiqueta: '[API]' });
 
 // ========================================
 // INICIO DEL SERVIDOR

@@ -1,18 +1,12 @@
 require('dotenv').config();
 const { ocultarCredenciales } = require('../utils/ocultarCredenciales');
+const { conectarMongo } = require('../utils/conectarMongo');
 const mongoose = require('mongoose');
 const envioLoteService = require('../services/envioLoteService');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/sifen_db';
 
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  maxPoolSize: 10,
-  serverSelectionTimeoutMS: 5000
-})
-.then(() => console.log('✅ [LOTE-WORKER] MongoDB conectado'))
-.catch(err => console.error('❌ [LOTE-WORKER] Error conectando a MongoDB:', err.message));
+conectarMongo({ uri: MONGODB_URI, etiqueta: '[LOTE-WORKER]', opciones: { maxPoolSize: 10 } });
 
 const INTERVALO_MS = 30000;
 // Un lote con menos de 50 documentos se envía igual cuando su factura más

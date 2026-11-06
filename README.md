@@ -635,11 +635,16 @@ Los artefactos propios están versionados en el repo:
 ```
 assets/kude/
 ├── CreateKude.jar          # JAR propio
-└── jasper/
-    ├── Factura.jasper
-    ├── Factura-Ticket.jasper
-    ├── NotaCredito.jasper
-    └── NotaDebito.jasper
+├── jasper/                 # Plantillas compiladas (las que usa el servicio)
+│   ├── AutoFactura.jasper
+│   ├── Factura.jasper
+│   ├── Factura-Ticket.jasper
+│   ├── NotaCredito.jasper
+│   ├── NotaDebito.jasper
+│   └── NotaRemision.jasper
+└── jrxml/                  # Fuentes editables de las plantillas que las tienen
+    ├── CompilarJasper.java
+    └── NotaRemision.jrxml
 ```
 
 `services/kudeRunner.js` los combina con lo que trae la librería
@@ -678,5 +683,13 @@ npm run kude:prepare
 
 1. Editá o agregá el `.jasper` en `assets/kude/jasper/`.
 2. `npm run kude:doctor` para validar.
+
+Si la plantilla tiene fuente en `assets/kude/jrxml/` (hoy, la nota de
+remisión), se edita el `.jrxml` y se recompila con `npm run kude:compilar`,
+que deja el `.jasper` en `assets/kude/jasper/`. Hace falta un JDK 21.
+
+Los textos de la nota de remisión llevan `textAdjust="ScaleFont"`: si un dato
+no entra en su lugar se achica la letra en vez de cortarse. El servidor mide
+el texto con DejaVu Sans, más ancha que la fuente con la que se ve en Windows.
 
 No hay que copiar nada a `node_modules`.

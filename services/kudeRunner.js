@@ -81,14 +81,17 @@ function resolverJava() {
 }
 
 /**
- * Copia `origen` a `destino` solo si cambió (tamaño o fecha de modificación).
+ * Copia `origen` a `destino` solo si el contenido es distinto.
+ *
+ * Se compara el contenido y no el tamaño ni la fecha: una plantilla propia
+ * que solo cambia el ancho de un campo pesa lo mismo que la de la librería,
+ * y con la comparación anterior quedaba sin copiar.
  */
 function copiarSiCambio(origen, destino) {
   try {
-    const src = fs.statSync(origen);
-    const dst = fs.existsSync(destino) ? fs.statSync(destino) : null;
-    if (dst && dst.size === src.size && dst.mtimeMs >= src.mtimeMs) return false;
-    fs.copyFileSync(origen, destino);
+    const contenido = fs.readFileSync(origen);
+    if (fs.existsSync(destino) && contenido.equals(fs.readFileSync(destino))) return false;
+    fs.writeFileSync(destino, contenido);
     return true;
   } catch (error) {
     throw new Error(`No se pudo copiar ${origen} -> ${destino}: ${error.message}`);
@@ -110,16 +113,24 @@ function prepararPlantillas({ verbose = false } = {}) {
 
   const cambios = { libreria: [], propias: [] };
 
-  // El orden importa: primero la base, después las propias, que la pisan.
+  // Primero se decide de dónde sale cada plantilla (el orden importa: la base
+  // y después las propias, que la pisan) y recién entonces se copia. Así cada
+  // archivo se escribe una sola vez y nunca queda, ni por un instante, la
+  // versión de la librería de una plantilla que tiene versión propia.
+  const fuentes = new Map();
   for (const origenDir of [dirBase, JASPER_PROPIOS_DIR]) {
     if (!fs.existsSync(origenDir)) continue;
     const clave = origenDir === dirBase ? 'libreria' : 'propias';
 
     for (const archivo of fs.readdirSync(origenDir)) {
       if (!archivo.toLowerCase().endsWith('.jasper')) continue;
-      if (copiarSiCambio(path.join(origenDir, archivo), path.join(RUNTIME_DE_DIR, archivo))) {
-        cambios[clave].push(archivo);
-      }
+      fuentes.set(archivo, { ruta: path.join(origenDir, archivo), clave });
+    }
+  }
+
+  for (const [archivo, { ruta, clave }] of fuentes) {
+    if (copiarSiCambio(ruta, path.join(RUNTIME_DE_DIR, archivo))) {
+      cambios[clave].push(archivo);
     }
   }
 

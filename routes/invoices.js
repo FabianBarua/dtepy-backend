@@ -311,6 +311,32 @@ router.post('/bulk/delete', verificarPermiso('facturas:eliminar'), async (req, r
   }
 });
 
+// Regenerar el PDF (KUDE) de la selección con las plantillas vigentes.
+// Cada PDF levanta un proceso Java (varios segundos): va de a uno y con un
+// tope menor que el resto de las masivas para no agotar el tiempo del pedido.
+const MAX_BULK_PDF = 50;
+router.post('/bulk/regenerar-pdf', verificarPermiso('facturas:crear'), async (req, res) => {
+  try {
+    const seleccion = await cargarSeleccion(req);
+    if (seleccion.length > MAX_BULK_PDF) {
+      return res.status(400).json({ success: false, error: 'BULK_DEMASIADOS', message: `Máximo ${MAX_BULK_PDF} PDF por operación (pediste ${seleccion.length})` });
+    }
+    const resultados = [];
+    for (const { id, invoice } of seleccion) {
+      if (!invoice) { resultados.push({ id, ok: false, mensaje: 'No encontrado' }); continue; }
+      try {
+        const r = await acciones.regenerarPdf(invoice);
+        resultados.push({ id, correlativo: invoice.correlativo, ok: r.status === 200, mensaje: r.body.message });
+      } catch (error) {
+        resultados.push({ id, correlativo: invoice.correlativo, ok: false, mensaje: error.message });
+      }
+    }
+    responderBulk(res, resultados, 'Regeneración de PDF terminada');
+  } catch (error) {
+    errorBulk(res, error);
+  }
+});
+
 // -------------------------------------------------------------------
 // Rutas específicas (deben ir ANTES de /:id para evitar conflictos)
 // -------------------------------------------------------------------
@@ -738,6 +764,21 @@ router.post('/:id/refresh-status', verificarPermiso('facturas:crear'), async (re
   } catch (error) {
     console.error('❌ Error al actualizar estado:', error);
     res.status(500).json({ success: false, error: 'REFRESH_STATUS_ERROR', message: error.message });
+  }
+});
+
+// Regenerar el PDF (KUDE) con las plantillas vigentes; no toca el documento en SET
+router.post('/:id/regenerar-pdf', verificarPermiso('facturas:crear'), async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice || !perteneceAlAlcance(req, invoice.empresaId)) {
+      return res.status(404).json({ success: false, error: 'FACTURA_NOT_FOUND', message: 'Factura no encontrada' });
+    }
+    const r = await acciones.regenerarPdf(invoice);
+    res.status(r.status).json(r.body);
+  } catch (error) {
+    console.error('Error regenerando PDF:', error);
+    res.status(500).json({ success: false, error: 'PDF_REGENERAR_ERROR', message: error.message });
   }
 });
 

@@ -76,12 +76,22 @@ function elegibleEliminacion(invoice) {
   return { ok: true };
 }
 
+function elegibleRegenerarPdf(invoice) {
+  // El PDF se arma desde el XML firmado: solo tiene sentido para un documento
+  // que existe en SET. Uno rechazado o con error se reintenta, no se reimprime.
+  if (!ESTADOS_EN_SET.includes(invoice.estadoSifen) || !invoice.cdc) {
+    return { ok: false, motivo: `Solo se regenera el PDF de un documento que existe en SET (estado actual: ${invoice.estadoSifen})` };
+  }
+  return { ok: true };
+}
+
 function elegibilidad(invoice) {
   return {
     reintento: elegibleReintento(invoice),
     cancelacion: elegibleCancelacion(invoice),
     eliminacion: elegibleEliminacion(invoice),
-    consultaEstado: { ok: Boolean(invoice.cdc), motivo: invoice.cdc ? undefined : 'Sin CDC' }
+    consultaEstado: { ok: Boolean(invoice.cdc), motivo: invoice.cdc ? undefined : 'Sin CDC' },
+    regenerarPdf: elegibleRegenerarPdf(invoice)
   };
 }
 
@@ -355,6 +365,69 @@ function rutaPdf(invoice) {
   return resolverArchivo(invoice.kudePath);
 }
 
+// ---------------------------------------------------------------------
+// Regenerar el PDF (KUDE)
+// ---------------------------------------------------------------------
+
+/**
+ * Vuelve a generar el KUDE de un documento que ya existe en SET, con las
+ * plantillas vigentes y el MISMO XML firmado. No toca el documento fiscal:
+ * no se firma, no se envía nada a SET y no se avisa por email ni webhook.
+ * Sirve para corregir un PDF que salió mal impreso (p. ej. el CDC cortado).
+ *
+ * El PDF nuevo pisa al anterior: sale con el mismo nombre y en la misma
+ * carpeta, porque se arma con los mismos datos con que lo arma el worker.
+ */
+async function regenerarPdf(invoice) {
+  const elegible = elegibleRegenerarPdf(invoice);
+  if (!elegible.ok) {
+    return { status: 400, body: { success: false, error: 'PDF_NO_REGENERABLE', message: elegible.motivo } };
+  }
+
+  let xml = invoice.xmlContent;
+  if (!xml) {
+    const ruta = rutaXml(invoice);
+    if (ruta) xml = fs.readFileSync(ruta, 'utf8');
+  }
+  if (!xml) {
+    return { status: 404, body: { success: false, error: 'PDF_SIN_XML', message: 'El documento no tiene guardado el XML firmado; sin él no se puede armar el PDF' } };
+  }
+
+  const Empresa = require('../models/Empresa');
+  const empresa = await Empresa.findById(invoice.empresaId);
+  if (!empresa) {
+    return { status: 404, body: { success: false, error: 'PDF_SIN_EMPRESA', message: 'No se encontró la empresa emisora del documento' } };
+  }
+
+  const registrar = (estado, descripcion, detalle) => new OperationLog({
+    invoiceId: invoice._id, tipoOperacion: 'regeneracion_pdf', descripcion, estado, fecha: new Date(),
+    detalle: { cdc: invoice.cdc, correlativo: invoice.correlativo, ...detalle }
+  }).save();
+
+  // generarKUDE no lanza: devuelve null si el JAR falla o no aparece el PDF.
+  const inicio = Date.now();
+  const { generarKUDE } = require('./procesarFacturaService');
+  const pdfPath = await generarKUDE(xml, invoice.cdc, invoice.correlativo, new Date(invoice.fechaCreacion), invoice.datosFactura, empresa);
+
+  // Como el PDF nuevo pisa al anterior, que el archivo exista no prueba nada:
+  // tiene que haberse escrito en esta corrida (2 s de margen por la precisión
+  // de fechas del sistema de archivos).
+  const escrito = Boolean(pdfPath) && fs.existsSync(pdfPath) && fs.statSync(pdfPath).mtimeMs >= inicio - 2000;
+  if (!escrito) {
+    await registrar('error', `No se pudo regenerar el PDF - ${invoice.correlativo}`, { pdfAnterior: invoice.kudePath || null });
+    return { status: 500, body: { success: false, error: 'PDF_REGENERAR_ERROR', message: 'No se pudo generar el PDF; el documento conserva el que tenía' } };
+  }
+
+  // updateOne y no save(): solo se tocan estos dos campos del documento fiscal.
+  await Invoice.updateOne({ _id: invoice._id }, { $set: { kudePath: pdfPath, proceso: 'Completado' } });
+  await registrar('success', `PDF regenerado - ${invoice.correlativo}`, { pdfAnterior: invoice.kudePath || null, pdfNuevo: pdfPath });
+
+  return {
+    status: 200,
+    body: { success: true, message: 'PDF regenerado', data: { facturaId: String(invoice._id), correlativo: invoice.correlativo, cdc: invoice.cdc } }
+  };
+}
+
 /** Nombre de archivo estable y legible: <tipo>_<correlativo>.<ext> */
 function nombreArchivo(invoice, ext) {
   const tipo = String(invoice.de || 'Factura electrónica')
@@ -435,10 +508,12 @@ module.exports = {
   elegibleReintento,
   elegibleCancelacion,
   elegibleEliminacion,
+  elegibleRegenerarPdf,
   elegibilidad,
   consultarEstadoEnSet,
   reintentarEnvio,
   eliminarFactura,
+  regenerarPdf,
   rutaXml,
   rutaPdf,
   nombreArchivo,

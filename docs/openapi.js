@@ -851,6 +851,22 @@ exterior (obligatoria).
       }
     },
 
+    '/api/invoices/{id}/regenerar-pdf': {
+      post: {
+        tags: ['Facturas'],
+        summary: 'Regenerar el PDF (KUDE)',
+        description: 'Vuelve a generar el PDF con las plantillas vigentes a partir del mismo XML firmado y reemplaza al anterior. No firma, no envía nada a SET y no avisa por email ni webhook. Solo para documentos que existen en SET (aceptado, observado o cancelado). Requiere el permiso `facturas:crear`. Para varios documentos: `POST /api/invoices/bulk/regenerar-pdf` con `{ ids: [...] }` (máximo 50).',
+        parameters: [paramRuta('id', 'ID de la factura')],
+        responses: {
+          200: okJson('PDF regenerado'),
+          400: respuestaError('El documento no existe en SET (rechazado, con error o todavía en curso)'),
+          401: NO_AUTORIZADO,
+          404: respuestaError('La factura no existe, o no tiene guardado el XML firmado'),
+          500: respuestaError('No se pudo generar el PDF; el documento conserva el que tenía')
+        }
+      }
+    },
+
     '/api/invoices/{id}/download-xml': {
       get: {
         tags: ['Facturas'],

@@ -7,8 +7,8 @@ const rutaColas = require.resolve('../queues/facturaQueue');
 require.cache[rutaColas] = { id: rutaColas, filename: rutaColas, loaded: true, exports: { facturaQueue: {}, kudeQueue: {} } };
 
 const {
-  elegibleReintento, elegibleCancelacion, elegibleEliminacion, elegibilidad,
-  nombreArchivo, filaCsv, aCsv
+  elegibleReintento, elegibleCancelacion, elegibleEliminacion, elegibleRegenerarPdf, elegibilidad,
+  regenerarPdf, nombreArchivo, filaCsv, aCsv
 } = require('../services/facturaAccionesService');
 
 const hace = (horas) => new Date(Date.now() - horas * 3600000);
@@ -44,9 +44,9 @@ test('eliminación: nunca un documento que existe en SET', () => {
   assert.equal(elegibleEliminacion({ estadoSifen: 'encolado' }).ok, false);
 });
 
-test('elegibilidad agrupa las cuatro acciones', () => {
+test('elegibilidad agrupa las cinco acciones', () => {
   const e = elegibilidad({ estadoSifen: 'rechazado', datosFactura: { data: { x: 1 } } });
-  assert.deepEqual(Object.keys(e), ['reintento', 'cancelacion', 'eliminacion', 'consultaEstado']);
+  assert.deepEqual(Object.keys(e), ['reintento', 'cancelacion', 'eliminacion', 'consultaEstado', 'regenerarPdf']);
   assert.equal(e.consultaEstado.ok, false);
 });
 
@@ -73,3 +73,115 @@ test('CSV: separador ; con BOM, comillas escapadas y el CDC protegido de Excel',
   assert.ok(csv.split('\r\n')[0].includes('"Protocolo SET"'), 'columna de protocolo');
   assert.ok(linea.includes('"0260";"Aprobado";"3556326022"'), 'protocolo de autorización de SET en la fila');
 });
+
+// ---------------------------------------------------------------------
+// Regenerar PDF
+// ---------------------------------------------------------------------
+
+test('regenerar PDF: solo documentos que existen en SET', () => {
+  for (const estado of ['aceptado', 'observado', 'cancelado']) {
+    assert.equal(elegibleRegenerarPdf({ estadoSifen: estado, cdc: 'x' }).ok, true, estado);
+  }
+  for (const estado of ['rechazado', 'error', 'encolado', 'procesando']) {
+    assert.equal(elegibleRegenerarPdf({ estadoSifen: estado, cdc: 'x' }).ok, false, estado);
+  }
+  assert.equal(elegibleRegenerarPdf({ estadoSifen: 'aceptado' }).ok, false, 'sin CDC');
+});
+
+{
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const Invoice = require('../models/Invoice');
+  const OperationLog = require('../models/OperationLog');
+
+  // regenerarPdf carga estos módulos recién al ejecutarse: se reemplazan en la
+  // caché para no tocar MongoDB ni levantar Java.
+  const stub = (ruta, exports) => {
+    const resuelta = require.resolve(ruta);
+    require.cache[resuelta] = { id: resuelta, filename: resuelta, loaded: true, exports };
+  };
+
+  const preparar = ({ generar, empresa = { ruc: '80055783-2' } }) => {
+    const estado = { llamadasKude: [], updates: [], logs: [] };
+    stub('../models/Empresa', { findById: async () => empresa });
+    stub('../services/procesarFacturaService', {
+      generarKUDE: async (...args) => { estado.llamadasKude.push(args); return generar(); }
+    });
+    Invoice.updateOne = async (filtro, cambio) => { estado.updates.push({ filtro, cambio }); return { modifiedCount: 1 }; };
+    OperationLog.prototype.save = async function () { estado.logs.push(this.toObject()); return this; };
+    return estado;
+  };
+
+  const documento = (extra = {}) => ({
+    _id: '6aedd711a1f290b6c27c9d5e', estadoSifen: 'aceptado', cdc: '01800557832001002000002522026110618319971046',
+    correlativo: '001-002-0000025', fechaCreacion: new Date('2026-11-06T13:33:03Z'), empresaId: 'emp1',
+    datosFactura: { data: { establecimiento: '001', punto: '002', numero: '0000025' } },
+    xmlContent: '<rDE>firmado</rDE>', kudePath: '/app/de_output/viejo.pdf', ...extra
+  });
+
+  const pdfTemporal = (antiguedadMs = 0) => {
+    const ruta = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'regen-pdf-')), 'kude.pdf');
+    fs.writeFileSync(ruta, '%PDF-1.4');
+    if (antiguedadMs) { const t = new Date(Date.now() - antiguedadMs); fs.utimesSync(ruta, t, t); }
+    return ruta;
+  };
+
+  test('regenerar PDF: usa el XML firmado guardado y solo toca kudePath y proceso', async () => {
+    const pdf = pdfTemporal();
+    const estado = preparar({ generar: () => pdf });
+    const doc = documento();
+
+    const r = await regenerarPdf(doc);
+
+    assert.equal(r.status, 200);
+    assert.equal(r.body.data.correlativo, '001-002-0000025');
+    assert.equal(estado.llamadasKude.length, 1);
+    const [xml, cdc, correlativo, fecha, datos] = estado.llamadasKude[0];
+    assert.equal(xml, '<rDE>firmado</rDE>', 'el mismo XML firmado: no se vuelve a generar ni a firmar');
+    assert.equal(cdc, doc.cdc);
+    assert.equal(correlativo, doc.correlativo);
+    assert.equal(fecha.getTime(), doc.fechaCreacion.getTime(), 'misma fecha: mismo directorio que el PDF original');
+    assert.equal(datos, doc.datosFactura);
+    assert.deepEqual(estado.updates, [{ filtro: { _id: doc._id }, cambio: { $set: { kudePath: pdf, proceso: 'Completado' } } }]);
+    assert.equal(estado.logs.length, 1);
+    assert.equal(estado.logs[0].tipoOperacion, 'regeneracion_pdf');
+    assert.equal(estado.logs[0].estado, 'success');
+    assert.equal(estado.logs[0].detalle.pdfAnterior, '/app/de_output/viejo.pdf');
+  });
+
+  test('regenerar PDF: un documento que no existe en SET no llega a generar nada', async () => {
+    const estado = preparar({ generar: () => pdfTemporal() });
+    const r = await regenerarPdf(documento({ estadoSifen: 'rechazado' }));
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error, 'PDF_NO_REGENERABLE');
+    assert.equal(estado.llamadasKude.length, 0);
+    assert.equal(estado.updates.length, 0);
+  });
+
+  test('regenerar PDF: sin XML firmado responde 404 y no genera', async () => {
+    const estado = preparar({ generar: () => pdfTemporal() });
+    const r = await regenerarPdf(documento({ xmlContent: undefined, xmlPath: undefined }));
+    assert.equal(r.status, 404);
+    assert.equal(r.body.error, 'PDF_SIN_XML');
+    assert.equal(estado.llamadasKude.length, 0);
+  });
+
+  test('regenerar PDF: si la generación falla el registro queda como estaba', async () => {
+    const estado = preparar({ generar: () => null });
+    const r = await regenerarPdf(documento());
+    assert.equal(r.status, 500);
+    assert.equal(r.body.error, 'PDF_REGENERAR_ERROR');
+    assert.equal(estado.updates.length, 0, 'no se toca kudePath');
+    assert.equal(estado.logs[0].estado, 'error');
+  });
+
+  test('regenerar PDF: un PDF que ya estaba (no se reescribió) cuenta como fallo', async () => {
+    // El PDF nuevo pisa al anterior: si el archivo existe pero es viejo, el
+    // generador no escribió nada y no se puede informar "regenerado".
+    const estado = preparar({ generar: () => pdfTemporal(60000) });
+    const r = await regenerarPdf(documento());
+    assert.equal(r.status, 500);
+    assert.equal(estado.updates.length, 0);
+  });
+}
